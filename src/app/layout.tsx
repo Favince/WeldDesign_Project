@@ -16,12 +16,12 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://krisavaaerovin.my.id"),
   title: "WeldDesign Production | Aerovin",
   description:
-    "Web app terpadu untuk estimasi biaya las, inventaris, monitoring proyek, AI inspection, DKV generator, portofolio siswa, dan client portal.",
+    "Web app terpadu untuk estimasi biaya las, inventaris, monitoring proyek, portofolio siswa, e-learning, dan client portal.",
   applicationName: "WeldDesign Production",
   openGraph: {
     title: "WeldDesign Production",
     description:
-      "Console produksi las dan desain DKV untuk guru, siswa, admin, dan client.",
+      "Console produksi las untuk guru, siswa, admin, dan client.",
     url: "https://krisavaaerovin.my.id",
     siteName: "WeldDesign Production",
     locale: "id_ID",

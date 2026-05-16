@@ -5,7 +5,6 @@ import {
   BarChart3,
   Bell,
   BookOpenCheck,
-  Bot,
   Calculator,
   Camera,
   ChartNoAxesGantt,
@@ -19,7 +18,6 @@ import {
   FileSpreadsheet,
   FileText,
   GalleryVerticalEnd,
-  GraduationCap,
   HardHat,
   LayoutDashboard,
   LockKeyhole,
@@ -28,27 +26,22 @@ import {
   Megaphone,
   MessageSquareText,
   Package,
-  PenTool,
   Play,
   Plus,
   RefreshCw,
-  ScanSearch,
   Send,
   Share2,
   ShieldCheck,
   Smartphone,
-  Sparkles,
   Star,
   Save,
+  ThumbsDown,
   ThumbsUp,
-  Upload,
   UserRound,
-  WandSparkles,
   X,
   type LucideIcon,
 } from "lucide-react";
-import Image from "next/image";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import { LoginPage } from "@/components/auth/login-page";
 import { type AppUser } from "@/lib/auth-demo";
 import {
@@ -81,7 +74,6 @@ import {
   maintenanceEvents,
   portfolioItems,
   projectStages,
-  scanSamples,
   socialPosts,
 } from "@/lib/weld-data";
 
@@ -91,8 +83,6 @@ type SectionId =
   | "estimator"
   | "inventory"
   | "projects"
-  | "ai"
-  | "design"
   | "portfolio"
   | "gallery"
   | "social"
@@ -122,7 +112,7 @@ const navigation: NavItem[] = [
     label: "Security",
     icon: ShieldCheck,
     permission: "users:manage",
-    summary: "RBAC, session policy, OTP, audit log, dan hardening.",
+    summary: "RBAC, session policy, audit log, dan hardening.",
   },
   {
     id: "estimator",
@@ -144,20 +134,6 @@ const navigation: NavItem[] = [
     icon: ChartNoAxesGantt,
     permission: "project:update",
     summary: "Timeline, progress harian, media, GPS, dan approval.",
-  },
-  {
-    id: "ai",
-    label: "AI Las",
-    icon: ScanSearch,
-    permission: "ai:scan",
-    summary: "Upload foto, deteksi cacat, rekomendasi, confidence.",
-  },
-  {
-    id: "design",
-    label: "DKV",
-    icon: PenTool,
-    permission: "design:generate",
-    summary: "Generate poster, blueprint, logo, mockup, dan animasi.",
   },
   {
     id: "portfolio",
@@ -185,21 +161,21 @@ const navigation: NavItem[] = [
     label: "E-Learning",
     icon: BookOpenCheck,
     permission: "learning:access",
-    summary: "Materi las, DKV, quiz, dan progress pembelajaran.",
+    summary: "Materi download, soal Google Form, score, dan koreksi otomatis.",
   },
   {
     id: "analytics",
     label: "Analytics",
     icon: BarChart3,
     permission: "analytics:read",
-    summary: "Performa siswa, biaya rata-rata, approval, dan SLA.",
+    summary: "Dashboard performa berbasis Google Spreadsheet.",
   },
   {
     id: "client",
     label: "Client",
     icon: ClipboardList,
     permission: "project:approve",
-    summary: "Portal client untuk progress dan approval real-time.",
+    summary: "Order, progress 0-100, finish, dan persetujuan aman client.",
   },
   {
     id: "mobile",
@@ -251,20 +227,41 @@ type SocialPostState = {
   engagement: string;
 };
 
-type WeldScanResult = {
-  detectedType: string;
-  quality: string;
-  confidence: number;
-  recommendation: string;
-  createdAt: string;
+type PortfolioState = {
+  id: string;
+  title: string;
+  student: string;
+  major: string;
+  year: string;
+  rating: number;
+  summary: string;
+  pdfName: string;
 };
 
-type GeneratedAsset = {
+type LearningState = {
   id: string;
-  kind: string;
   title: string;
-  prompt: string;
+  type: "Materi" | "Soal";
+  description: string;
+  progress: number;
+  score: number;
+  corrected: string;
+  materialFileName?: string;
+  materialDownloadUrl?: string;
+  materialBody?: string;
+  formUrl?: string;
+  sheetUrl?: string;
+};
+
+type ClientOrderState = {
+  id: string;
+  title: string;
+  client: string;
+  issue: string;
   status: string;
+  progress: number;
+  approved: boolean;
+  accepted: boolean;
 };
 
 export function WeldDesignApp() {
@@ -289,32 +286,6 @@ export function WeldDesignApp() {
   const [inventoryList, setInventoryList] = useState<InventoryState[]>(() =>
     inventoryItems.map((item) => ({ ...item })),
   );
-  const [uploadName, setUploadName] = useState("weld-qc-sample.jpg");
-  const [scanResult, setScanResult] = useState<WeldScanResult>({
-    detectedType: scanSamples[0].title,
-    quality: scanSamples[0].result,
-    confidence: scanSamples[0].confidence,
-    recommendation: scanSamples[0].recommendation,
-    createdAt: new Date().toISOString(),
-  });
-  const [scanState, setScanState] = useState<ApiState>({
-    state: "idle",
-    message: "Pilih foto lalu jalankan scan.",
-  });
-
-  const [designPrompt, setDesignPrompt] = useState(
-    "Poster safety welding untuk workshop sekolah, warna steel dan amber",
-  );
-  const [designKind, setDesignKind] = useState("Poster");
-  const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([
-    {
-      id: "asset-1",
-      kind: "Blueprint",
-      title: "Welding Safety Campaign",
-      prompt: "Blueprint safety workshop",
-      status: "Generated",
-    },
-  ]);
 
   const [scheduledPosts, setScheduledPosts] = useState<SocialPostState[]>(() =>
     socialPosts.map((post) => ({ ...post })),
@@ -436,32 +407,6 @@ export function WeldDesignApp() {
     }
   }
 
-  async function runWeldScan() {
-    setScanState({ state: "loading", message: "AI scan sedang berjalan..." });
-
-    try {
-      const response = await fetch("/api/ai/weld-scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: uploadName, projectId: "demo-project" }),
-      });
-      const payload = (await response.json()) as WeldScanResult | { error: string };
-
-      if (!response.ok || "error" in payload) {
-        throw new Error("error" in payload ? payload.error : "AI scan gagal");
-      }
-
-      setScanResult(payload);
-      setScanState({ state: "done", message: "Scan selesai dan tersimpan di riwayat." });
-      setNotice("AI scan selesai");
-    } catch (error) {
-      setScanState({
-        state: "error",
-        message: error instanceof Error ? error.message : "AI scan gagal",
-      });
-    }
-  }
-
   function approveStage(stageName: string) {
     setProjectStageList((stages) =>
       stages.map((stage) =>
@@ -483,6 +428,28 @@ export function WeldDesignApp() {
           : stage,
       ),
     );
+  }
+
+  function regressStage(stageName: string) {
+    setProjectStageList((stages) =>
+      stages.map((stage) =>
+        stage.name === stageName
+          ? {
+              ...stage,
+              progress: Math.max(0, stage.progress - 12),
+              state: Math.max(0, stage.progress - 12) === 0 ? "Waiting" : "Need revision",
+            }
+          : stage,
+      ),
+    );
+    setNotice(`Progress "${stageName}" dikurangi`);
+  }
+
+  function updateProjectStage(stageName: string, nextStage: ProjectStageState) {
+    setProjectStageList((stages) =>
+      stages.map((stage) => (stage.name === stageName ? nextStage : stage)),
+    );
+    setNotice(`Tahap "${nextStage.name}" berhasil diedit`);
   }
 
   function markInventoryDamaged(code: string) {
@@ -519,19 +486,6 @@ export function WeldDesignApp() {
     setNotice("Item inventaris demo ditambahkan");
   }
 
-  function generateDesignAsset() {
-    const nextAsset: GeneratedAsset = {
-      id: `asset-${Date.now()}`,
-      kind: designKind,
-      title: `${designKind} proyek las`,
-      prompt: designPrompt,
-      status: "Generated",
-    };
-
-    setGeneratedAssets((assets) => [nextAsset, ...assets]);
-    setNotice(`${designKind} berhasil digenerate`);
-  }
-
   async function scheduleSocialPost() {
     setNotice("Mengirim jadwal post...");
 
@@ -564,10 +518,6 @@ export function WeldDesignApp() {
 
   function likeGalleryItem(title: string) {
     setGalleryLikes((likes) => ({ ...likes, [title]: (likes[title] ?? 0) + 1 }));
-  }
-
-  function startQuiz(title: string) {
-    setNotice(`Quiz "${title}" dibuka`);
   }
 
   if (!isWorkspaceOpen) {
@@ -614,28 +564,18 @@ export function WeldDesignApp() {
           projectStageList={projectStageList}
           approveStage={approveStage}
           advanceStage={advanceStage}
+          regressStage={regressStage}
+          updateProjectStage={updateProjectStage}
           inventoryList={inventoryList}
           addInventoryDemoItem={addInventoryDemoItem}
           markInventoryDamaged={markInventoryDamaged}
           updateInventoryItem={updateInventoryItem}
-          uploadName={uploadName}
-          setUploadName={setUploadName}
-          scanResult={scanResult}
-          scanState={scanState}
-          runWeldScan={runWeldScan}
-          designPrompt={designPrompt}
-          setDesignPrompt={setDesignPrompt}
-          designKind={designKind}
-          setDesignKind={setDesignKind}
-          generatedAssets={generatedAssets}
-          generateDesignAsset={generateDesignAsset}
           scheduledPosts={scheduledPosts}
           socialDraft={socialDraft}
           setSocialDraft={setSocialDraft}
           scheduleSocialPost={scheduleSocialPost}
           galleryLikes={galleryLikes}
           likeGalleryItem={likeGalleryItem}
-          startQuiz={startQuiz}
           setNotice={setNotice}
         />
       </section>
@@ -793,28 +733,18 @@ function ActiveWorkspace(props: {
   projectStageList: ProjectStageState[];
   approveStage: (stageName: string) => void;
   advanceStage: (stageName: string) => void;
+  regressStage: (stageName: string) => void;
+  updateProjectStage: (stageName: string, nextStage: ProjectStageState) => void;
   inventoryList: InventoryState[];
   addInventoryDemoItem: () => void;
   markInventoryDamaged: (code: string) => void;
   updateInventoryItem: (code: string, nextItem: InventoryState) => void;
-  uploadName: string;
-  setUploadName: (name: string) => void;
-  scanResult: WeldScanResult;
-  scanState: ApiState;
-  runWeldScan: () => void;
-  designPrompt: string;
-  setDesignPrompt: (prompt: string) => void;
-  designKind: string;
-  setDesignKind: (kind: string) => void;
-  generatedAssets: GeneratedAsset[];
-  generateDesignAsset: () => void;
   scheduledPosts: SocialPostState[];
   socialDraft: { platform: string; caption: string; scheduledAt: string };
   setSocialDraft: (draft: { platform: string; caption: string; scheduledAt: string }) => void;
   scheduleSocialPost: () => void;
   galleryLikes: Record<string, number>;
   likeGalleryItem: (title: string) => void;
-  startQuiz: (title: string) => void;
   setNotice: (notice: string) => void;
 }) {
   const navItem = navigation.find((item) => item.id === props.activeSection) ?? navigation[0];
@@ -860,27 +790,8 @@ function ActiveWorkspace(props: {
           projectStageList={props.projectStageList}
           approveStage={props.approveStage}
           advanceStage={props.advanceStage}
-        />
-      );
-    case "ai":
-      return (
-        <AiWorkspace
-          uploadName={props.uploadName}
-          setUploadName={props.setUploadName}
-          scanResult={props.scanResult}
-          scanState={props.scanState}
-          runWeldScan={props.runWeldScan}
-        />
-      );
-    case "design":
-      return (
-        <DesignWorkspace
-          designPrompt={props.designPrompt}
-          setDesignPrompt={props.setDesignPrompt}
-          designKind={props.designKind}
-          setDesignKind={props.setDesignKind}
-          generatedAssets={props.generatedAssets}
-          generateDesignAsset={props.generateDesignAsset}
+          regressStage={props.regressStage}
+          updateProjectStage={props.updateProjectStage}
         />
       );
     case "portfolio":
@@ -902,7 +813,7 @@ function ActiveWorkspace(props: {
         />
       );
     case "learning":
-      return <LearningWorkspace startQuiz={props.startQuiz} />;
+      return <LearningWorkspace selectedRole={props.selectedRole} setNotice={props.setNotice} />;
     case "analytics":
       return <AnalyticsWorkspace />;
     case "client":
@@ -911,6 +822,7 @@ function ActiveWorkspace(props: {
           selectedRole={props.selectedRole}
           projectStageList={props.projectStageList}
           approveStage={props.approveStage}
+          setNotice={props.setNotice}
         />
       );
     case "mobile":
@@ -933,7 +845,7 @@ function OverviewWorkspace({
   selectedRole: Role;
   openSection: (section: SectionId) => void;
 }) {
-  const priorityModules: SectionId[] = ["estimator", "projects", "inventory", "ai"];
+  const priorityModules: SectionId[] = ["estimator", "projects", "inventory", "client"];
 
   return (
     <div className="grid gap-4">
@@ -1332,65 +1244,191 @@ function ProjectWorkspace({
   projectStageList,
   approveStage,
   advanceStage,
+  regressStage,
+  updateProjectStage,
 }: {
   selectedRole: Role;
   projectStageList: ProjectStageState[];
   approveStage: (stageName: string) => void;
   advanceStage: (stageName: string) => void;
+  regressStage: (stageName: string) => void;
+  updateProjectStage: (stageName: string, nextStage: ProjectStageState) => void;
 }) {
   const canUpdate = canAccess(selectedRole, "project:update");
   const canApprove = canAccess(selectedRole, "project:approve");
+  const [editingStage, setEditingStage] = useState<string | null>(null);
+  const [stageDraft, setStageDraft] = useState<ProjectStageState | null>(null);
+
+  function startEdit(stage: ProjectStageState) {
+    setEditingStage(stage.name);
+    setStageDraft({ ...stage });
+  }
+
+  function cancelEdit() {
+    setEditingStage(null);
+    setStageDraft(null);
+  }
+
+  function updateDraft<K extends keyof ProjectStageState>(
+    key: K,
+    value: ProjectStageState[K],
+  ) {
+    setStageDraft((draft) => (draft ? { ...draft, [key]: value } : draft));
+  }
+
+  function saveStage(originalName: string) {
+    if (!stageDraft) {
+      return;
+    }
+
+    updateProjectStage(originalName, {
+      ...stageDraft,
+      name: stageDraft.name.trim() || originalName,
+      progress: Math.min(100, Math.max(0, Number(stageDraft.progress) || 0)),
+    });
+    cancelEdit();
+  }
 
   return (
     <Panel>
       <PanelTitle icon={ChartNoAxesGantt} eyebrow="Monitoring" title="Timeline proyek" />
       <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
-        <div className="grid grid-cols-[1fr_92px_110px] gap-3 bg-stone-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-stone-500 md:grid-cols-[1fr_90px_90px_180px]">
+        <div className="grid grid-cols-[1fr_78px_86px] gap-3 bg-stone-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-stone-500 md:grid-cols-[1fr_90px_90px_260px]">
           <span>Tahap</span>
           <span>Mulai</span>
           <span>Selesai</span>
           <span className="hidden md:block">Aksi</span>
         </div>
-        {projectStageList.map((stage) => (
-          <div key={stage.name} className="border-t border-stone-100 px-3 py-3">
-            <div className="grid grid-cols-[1fr_92px_110px] gap-3 text-sm md:grid-cols-[1fr_90px_90px_180px] md:items-center">
-              <div>
-                <p className="font-semibold">{stage.name}</p>
-                <p className="mt-1 text-xs text-stone-500">
-                  {stage.owner} | {stage.state}
-                </p>
-              </div>
-              <span className="text-stone-600">{stage.start}</span>
-              <span className="text-stone-600">{stage.end}</span>
-              <div className="col-span-3 flex gap-2 md:col-span-1">
-                <button
-                  type="button"
-                  onClick={() => advanceStage(stage.name)}
-                  disabled={!canUpdate}
-                  title={canUpdate ? "Update progress" : "Role ini tidak punya project:update"}
-                  className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  + Progress
-                </button>
-                <button
-                  type="button"
-                  onClick={() => approveStage(stage.name)}
-                  disabled={!canApprove}
-                  title={canApprove ? "Approve tahap" : "Role ini tidak punya project:approve"}
-                  className="rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
-                >
-                  Approve
-                </button>
+        {projectStageList.map((stage) => {
+          const editing = editingStage === stage.name ? stageDraft : null;
+
+          return (
+            <div key={stage.name} className="border-t border-stone-100 px-3 py-3">
+              {editing ? (
+                <div className="grid gap-2">
+                  <div className="grid gap-2 md:grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr]">
+                    <input
+                      name="projectStageName"
+                      value={editing.name}
+                      onChange={(event) => updateDraft("name", event.target.value)}
+                      className="rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-stone-500"
+                    />
+                    <input
+                      name="projectStageStart"
+                      value={editing.start}
+                      onChange={(event) => updateDraft("start", event.target.value)}
+                      className="rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-stone-500"
+                    />
+                    <input
+                      name="projectStageEnd"
+                      value={editing.end}
+                      onChange={(event) => updateDraft("end", event.target.value)}
+                      className="rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-stone-500"
+                    />
+                    <input
+                      name="projectStageProgress"
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={editing.progress}
+                      onChange={(event) =>
+                        updateDraft("progress", Number(event.target.value))
+                      }
+                      className="rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-stone-500"
+                    />
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <input
+                      name="projectStageOwner"
+                      value={editing.owner}
+                      onChange={(event) => updateDraft("owner", event.target.value)}
+                      className="rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-stone-500"
+                    />
+                    <input
+                      name="projectStageState"
+                      value={editing.state}
+                      onChange={(event) => updateDraft("state", event.target.value)}
+                      className="rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-stone-500"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => saveStage(stage.name)}
+                      className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
+                    >
+                      <Save className="size-4" aria-hidden="true" />
+                      Simpan
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEdit}
+                      className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+                    >
+                      <X className="size-4" aria-hidden="true" />
+                      Batal
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-[1fr_78px_86px] gap-3 text-sm md:grid-cols-[1fr_90px_90px_260px] md:items-center">
+                  <div>
+                    <p className="font-semibold">{stage.name}</p>
+                    <p className="mt-1 text-xs text-stone-500">
+                      {stage.owner} | {stage.state}
+                    </p>
+                  </div>
+                  <span className="text-stone-600">{stage.start}</span>
+                  <span className="text-stone-600">{stage.end}</span>
+                  <div className="col-span-3 flex flex-wrap gap-2 md:col-span-1">
+                    <button
+                      type="button"
+                      onClick={() => advanceStage(stage.name)}
+                      disabled={!canUpdate}
+                      title={canUpdate ? "Tambah progress" : "Role ini tidak punya project:update"}
+                      className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      + Progress
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => regressStage(stage.name)}
+                      disabled={!canUpdate}
+                      title={canUpdate ? "Kurangi progress" : "Role ini tidak punya project:update"}
+                      className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      - Progress
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => startEdit(stage)}
+                      disabled={!canUpdate}
+                      className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Edit3 className="size-3" aria-hidden="true" />
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => approveStage(stage.name)}
+                      disabled={!canApprove}
+                      title={canApprove ? "Approve tahap" : "Role ini tidak punya project:approve"}
+                      className="rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                    >
+                      Approve
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="mt-3 h-2 rounded-full bg-stone-100">
+                <div
+                  className="h-2 rounded-full bg-emerald-500 transition-all"
+                  style={{ width: `${stage.progress}%` }}
+                />
               </div>
             </div>
-            <div className="mt-3 h-2 rounded-full bg-stone-100">
-              <div
-                className="h-2 rounded-full bg-emerald-500 transition-all"
-                style={{ width: `${stage.progress}%` }}
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <ActionTile icon={Camera} label="Before-after" value="24 media" />
@@ -1605,203 +1643,201 @@ function InventoryWorkspace({
   );
 }
 
-function AiWorkspace({
-  uploadName,
-  setUploadName,
-  scanResult,
-  scanState,
-  runWeldScan,
-}: {
-  uploadName: string;
-  setUploadName: (name: string) => void;
-  scanResult: WeldScanResult;
-  scanState: ApiState;
-  runWeldScan: () => void;
-}) {
-  return (
-    <section className="grid gap-4 xl:grid-cols-[0.75fr_1fr]">
-      <Panel>
-        <PanelTitle icon={Bot} eyebrow="Upload" title="Foto sambungan las" />
-        <label className="mt-4 flex min-h-56 cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-stone-300 bg-white p-4 text-center hover:bg-stone-50">
-          <Upload className="size-8 text-stone-500" aria-hidden="true" />
-          <span className="text-sm font-semibold text-stone-700">{uploadName}</span>
-          <span className="text-xs text-stone-500">Klik untuk memilih gambar</span>
-          <input
-            type="file"
-            name="weldScanImage"
-            accept="image/*"
-            className="sr-only"
-            onChange={(event) =>
-              setUploadName(event.target.files?.[0]?.name ?? "weld-qc-sample.jpg")
-            }
-          />
-        </label>
-        <button
-          type="button"
-          onClick={runWeldScan}
-          disabled={scanState.state === "loading"}
-          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:opacity-60"
-        >
-          <ScanSearch className="size-4" aria-hidden="true" />
-          {scanState.state === "loading" ? "Scanning..." : "Jalankan scan"}
-        </button>
-        <p
-          className={`mt-3 text-xs font-semibold ${
-            scanState.state === "error" ? "text-red-700" : "text-stone-500"
-          }`}
-        >
-          {scanState.message}
-        </p>
-      </Panel>
+function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void }) {
+  const [items, setItems] = useState<PortfolioState[]>(() =>
+    portfolioItems.map((item, index) => ({
+      id: `portfolio-${index}`,
+      title: item.title,
+      student: item.student,
+      major: item.major,
+      year: item.year,
+      rating: item.rating,
+      summary: `${item.student} membuat karya ${item.title} untuk jurusan ${item.major}.`,
+      pdfName: `${item.student.toLowerCase().replace(/\s+/g, "-")}-portfolio.pdf`,
+    })),
+  );
+  const [draft, setDraft] = useState<PortfolioState>({
+    id: "draft",
+    title: "Railing tangga minimalis",
+    student: "Nama Siswa",
+    major: "Teknik Las",
+    year: "2026",
+    rating: 4.7,
+    summary: "",
+    pdfName: "portfolio-siswa.pdf",
+  });
+  const [editingId, setEditingId] = useState<string | null>(null);
 
+  function updateDraft<K extends keyof PortfolioState>(key: K, value: PortfolioState[K]) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function autoMakePortfolio() {
+    setDraft((current) => ({
+      ...current,
+      summary: `${current.student} - ${current.major} ${current.year}. Karya utama: ${current.title}. Portofolio otomatis siap dibagikan dan dicetak.`,
+      pdfName: `${current.student.toLowerCase().replace(/\s+/g, "-") || "portfolio"}-${current.year}.pdf`,
+    }));
+    setNotice("Portofolio otomatis dibuat dari isian");
+  }
+
+  function savePortfolio() {
+    const nextItem = {
+      ...draft,
+      id: editingId ?? `portfolio-${Date.now()}`,
+      title: draft.title.trim() || "Portofolio baru",
+      student: draft.student.trim() || "Siswa",
+      summary:
+        draft.summary.trim() ||
+        `${draft.student} membuat ${draft.title} sebagai karya portofolio.`,
+    };
+
+    setItems((current) =>
+      editingId
+        ? current.map((item) => (item.id === editingId ? nextItem : item))
+        : [nextItem, ...current],
+    );
+    setEditingId(null);
+    setNotice(editingId ? "Portofolio berhasil diedit" : "Portofolio baru dibuat");
+  }
+
+  function editPortfolio(item: PortfolioState) {
+    setDraft(item);
+    setEditingId(item.id);
+  }
+
+  function printPortfolio(item: PortfolioState) {
+    setNotice(`Membuka print PDF untuk ${item.pdfName}`);
+    window.print();
+  }
+
+  return (
+    <section className="grid gap-4 xl:grid-cols-[0.82fr_1.18fr]">
       <Panel>
-        <PanelTitle icon={Activity} eyebrow="Hasil AI" title="Deteksi dan rekomendasi" />
-        <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold">{scanResult.detectedType}</p>
-              <p className="mt-1 text-2xl font-semibold">{scanResult.quality}</p>
-            </div>
-            <div className="rounded-lg bg-cyan-50 px-3 py-2 text-center text-cyan-950">
-              <p className="text-xs font-semibold">Confidence</p>
-              <p className="text-xl font-bold">{scanResult.confidence}%</p>
-            </div>
+        <PanelTitle
+          icon={Share2}
+          eyebrow={editingId ? "Edit" : "Create"}
+          title="Auto portfolio builder"
+        />
+        <div className="mt-4 grid gap-3">
+          <input
+            name="portfolioTitle"
+            value={draft.title}
+            onChange={(event) => updateDraft("title", event.target.value)}
+            className="field"
+            placeholder="Judul karya"
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <input
+              name="portfolioStudent"
+              value={draft.student}
+              onChange={(event) => updateDraft("student", event.target.value)}
+              className="field"
+              placeholder="Nama siswa"
+            />
+            <input
+              name="portfolioMajor"
+              value={draft.major}
+              onChange={(event) => updateDraft("major", event.target.value)}
+              className="field"
+              placeholder="Jurusan"
+            />
           </div>
-          <p className="mt-4 text-sm leading-6 text-stone-600">
-            {scanResult.recommendation}
-          </p>
-          <p className="mt-4 text-xs font-semibold text-stone-500">
-            Riwayat: {new Date(scanResult.createdAt).toLocaleString("id-ID")}
-          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <input
+              name="portfolioYear"
+              value={draft.year}
+              onChange={(event) => updateDraft("year", event.target.value)}
+              className="field"
+              placeholder="Tahun"
+            />
+            <input
+              name="portfolioRating"
+              type="number"
+              min={0}
+              max={5}
+              step={0.1}
+              value={draft.rating}
+              onChange={(event) => updateDraft("rating", Number(event.target.value))}
+              className="field"
+              placeholder="Rating"
+            />
+          </div>
+          <textarea
+            name="portfolioSummary"
+            value={draft.summary}
+            onChange={(event) => updateDraft("summary", event.target.value)}
+            className="field min-h-28 resize-none"
+            placeholder="Ringkasan otomatis akan dibuat dari isian"
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={autoMakePortfolio}
+              className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+            >
+              Auto make
+            </button>
+            <button
+              type="button"
+              onClick={savePortfolio}
+              className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              {editingId ? "Simpan edit" : "Create"}
+            </button>
+          </div>
         </div>
       </Panel>
-    </section>
-  );
-}
 
-function DesignWorkspace({
-  designPrompt,
-  setDesignPrompt,
-  designKind,
-  setDesignKind,
-  generatedAssets,
-  generateDesignAsset,
-}: {
-  designPrompt: string;
-  setDesignPrompt: (prompt: string) => void;
-  designKind: string;
-  setDesignKind: (kind: string) => void;
-  generatedAssets: GeneratedAsset[];
-  generateDesignAsset: () => void;
-}) {
-  const designKinds = ["Poster", "Blueprint", "3D Mockup", "Logo", "Animasi"];
-
-  return (
-    <section className="grid gap-4 xl:grid-cols-[0.75fr_1fr]">
       <Panel>
-        <PanelTitle icon={WandSparkles} eyebrow="DKV" title="Generator desain" />
-        <div className="mt-4 flex flex-wrap gap-2">
-          {designKinds.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              onClick={() => setDesignKind(kind)}
-              className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
-                designKind === kind
-                  ? "border-stone-950 bg-stone-950 text-white"
-                  : "border-stone-200 bg-white text-stone-600 hover:bg-stone-100"
-              }`}
-            >
-              {kind}
-            </button>
+        <PanelTitle icon={FileText} eyebrow="Portofolio" title="Karya siswa" />
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {items.map((item) => (
+            <article key={item.id} className="rounded-lg border border-stone-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">{item.title}</p>
+                  <p className="mt-1 text-xs text-stone-500">
+                    {item.student} | {item.major} | {item.year}
+                  </p>
+                </div>
+                <span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">
+                  {item.rating}
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-stone-600">{item.summary}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => editPortfolio(item)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                >
+                  <Edit3 className="size-3" aria-hidden="true" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => printPortfolio(item)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
+                >
+                  <FileText className="size-3" aria-hidden="true" />
+                  Print PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNotice(`Link publik ${item.student} disiapkan`)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                >
+                  <Copy className="size-3" aria-hidden="true" />
+                  Share link
+                </button>
+              </div>
+            </article>
           ))}
         </div>
-        <Field label="Prompt desain">
-          <textarea
-            name="designPrompt"
-            value={designPrompt}
-            onChange={(event) => setDesignPrompt(event.target.value)}
-            className="field min-h-32 resize-none"
-          />
-        </Field>
-        <button
-          type="button"
-          onClick={generateDesignAsset}
-          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
-        >
-          <Sparkles className="size-4" aria-hidden="true" />
-          Generate
-        </button>
-      </Panel>
-
-      <Panel>
-        <PanelTitle icon={PenTool} eyebrow="Asset" title="Preview dan riwayat" />
-        <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="relative min-h-72 overflow-hidden rounded-lg border border-stone-200 bg-stone-950 text-white">
-            <Image
-              src="/blueprint.svg"
-              alt=""
-              fill
-              sizes="(min-width: 1024px) 45vw, 100vw"
-              className="object-cover opacity-75"
-              unoptimized
-            />
-            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-stone-950 via-stone-950/80 to-transparent p-4">
-              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-300">
-                {generatedAssets[0]?.kind ?? "Template"}
-              </p>
-              <p className="mt-1 text-2xl font-semibold">
-                {generatedAssets[0]?.title ?? "Welding Safety Campaign"}
-              </p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            {generatedAssets.map((asset) => (
-              <div key={asset.id} className="rounded-lg border border-stone-200 bg-white p-3">
-                <p className="text-sm font-semibold">{asset.title}</p>
-                <p className="mt-1 text-xs text-stone-500">{asset.kind}</p>
-                <p className="mt-2 line-clamp-2 text-xs leading-5 text-stone-600">
-                  {asset.prompt}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
       </Panel>
     </section>
-  );
-}
-
-function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void }) {
-  return (
-    <Panel>
-      <PanelTitle icon={Share2} eyebrow="Portofolio" title="Karya siswa" />
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        {portfolioItems.map((item) => (
-          <article key={`${item.student}-${item.title}`} className="rounded-lg border border-stone-200 bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold">{item.title}</p>
-                <p className="mt-1 text-xs text-stone-500">
-                  {item.student} | {item.major} | {item.year}
-                </p>
-              </div>
-              <span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">
-                {item.rating}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setNotice(`Link publik ${item.student} disiapkan`)}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
-            >
-              <Copy className="size-3" aria-hidden="true" />
-              Share link
-            </button>
-          </article>
-        ))}
-      </div>
-    </Panel>
   );
 }
 
@@ -1812,11 +1848,25 @@ function GalleryWorkspace({
   galleryLikes: Record<string, number>;
   likeGalleryItem: (title: string) => void;
 }) {
+  const [visibleItems, setVisibleItems] = useState(() =>
+    portfolioItems.map((item) => item.title),
+  );
+  const [dislikes, setDislikes] = useState<Record<string, number>>({});
+  const galleryItems = portfolioItems.filter((item) => visibleItems.includes(item.title));
+
+  function dislikeGalleryItem(title: string) {
+    setDislikes((current) => ({ ...current, [title]: (current[title] ?? 0) + 1 }));
+  }
+
+  function deleteGalleryItem(title: string) {
+    setVisibleItems((current) => current.filter((itemTitle) => itemTitle !== title));
+  }
+
   return (
     <Panel>
       <PanelTitle icon={GalleryVerticalEnd} eyebrow="Galeri Publik" title="Filter dan rating" />
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-        {portfolioItems.map((item) => (
+        {galleryItems.map((item) => (
           <article key={item.title} className="rounded-lg border border-stone-200 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1830,17 +1880,40 @@ function GalleryWorkspace({
                 {item.rating}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => likeGalleryItem(item.title)}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
-            >
-              <ThumbsUp className="size-3" aria-hidden="true" />
-              Like {galleryLikes[item.title] ?? 0}
-            </button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => likeGalleryItem(item.title)}
+                className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
+              >
+                <ThumbsUp className="size-3" aria-hidden="true" />
+                Like {galleryLikes[item.title] ?? 0}
+              </button>
+              <button
+                type="button"
+                onClick={() => dislikeGalleryItem(item.title)}
+                className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+              >
+                <ThumbsDown className="size-3" aria-hidden="true" />
+                Dislike {dislikes[item.title] ?? 0}
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteGalleryItem(item.title)}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+              >
+                <X className="size-3" aria-hidden="true" />
+                Hapus
+              </button>
+            </div>
           </article>
         ))}
       </div>
+      {galleryItems.length === 0 && (
+        <p className="mt-4 rounded-lg border border-stone-200 bg-white p-4 text-sm text-stone-500">
+          Galeri kosong setelah item dihapus.
+        </p>
+      )}
     </Panel>
   );
 }
@@ -1927,70 +2000,546 @@ function SocialWorkspace({
   );
 }
 
-function LearningWorkspace({ startQuiz }: { startQuiz: (title: string) => void }) {
+function LearningWorkspace({
+  selectedRole,
+  setNotice,
+}: {
+  selectedRole: Role;
+  setNotice: (notice: string) => void;
+}) {
+  const canEditLearning = selectedRole === "GURU";
+  const googleFormsCreateUrl = "https://docs.google.com/forms/create";
+  const googleSheetsCreateUrl = "https://docs.google.com/spreadsheets/create";
+  const [modules, setModules] = useState<LearningState[]>(() =>
+    learningModules.map((module, index) => ({
+      id: `learning-${index}`,
+      title: module.title,
+      type: module.kind,
+      description: module.description,
+      progress: module.progress,
+      score: module.score,
+      corrected:
+        module.kind === "Materi" ? "Materi siap di-download" : "Menunggu response Google Form",
+      materialFileName: module.materialFileName,
+      materialBody: module.materialBody,
+      formUrl: module.formUrl,
+      sheetUrl: module.sheetUrl,
+    })),
+  );
+
+  const [materialDraft, setMaterialDraft] = useState<LearningState>({
+    id: "material-draft",
+    title: "Materi inspeksi visual sambungan las",
+    type: "Materi",
+    description: "Upload PDF atau tulis ringkasan materi untuk siswa.",
+    progress: 0,
+    score: 0,
+    corrected: "Draft materi",
+    materialFileName: "materi-inspeksi-visual.txt",
+    materialBody:
+      "Materi inspeksi visual: cek undercut, porosity, overlap, spatter, dan dokumentasi before-after.",
+  });
+  const [questionDraft, setQuestionDraft] = useState<LearningState>({
+    id: "question-draft",
+    title: "Soal QC Visual",
+    type: "Soal",
+    description: "Soal memakai Google Form. Response diarahkan ke Google Spreadsheet.",
+    progress: 0,
+    score: 0,
+    corrected: "Draft soal",
+    formUrl: googleFormsCreateUrl,
+    sheetUrl: googleSheetsCreateUrl,
+  });
+  const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+
+  function updateMaterialDraft<K extends keyof LearningState>(
+    key: K,
+    value: LearningState[K],
+  ) {
+    setMaterialDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateQuestionDraft<K extends keyof LearningState>(
+    key: K,
+    value: LearningState[K],
+  ) {
+    setQuestionDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function uploadMaterial(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const fileUrl = URL.createObjectURL(file);
+    setMaterialDraft((current) => ({
+      ...current,
+      materialFileName: file.name,
+      materialDownloadUrl: fileUrl,
+      materialBody: `File upload: ${file.name}`,
+    }));
+    setNotice(`Materi "${file.name}" siap dipakai`);
+  }
+
+  function saveMaterialItem() {
+    if (!canEditLearning) {
+      return;
+    }
+
+    const nextModule = {
+      ...materialDraft,
+      id: editingMaterialId ?? `material-${Date.now()}`,
+      type: "Materi" as const,
+      title: materialDraft.title.trim() || "Materi baru",
+      description: materialDraft.description.trim() || "Materi belum punya deskripsi.",
+      materialFileName: materialDraft.materialFileName?.trim() || "materi-welddesign.txt",
+      corrected: "Materi siap di-download",
+    };
+
+    setModules((current) =>
+      editingMaterialId
+        ? current.map((module) => (module.id === editingMaterialId ? nextModule : module))
+        : [nextModule, ...current],
+    );
+    setEditingMaterialId(null);
+    setNotice(editingMaterialId ? "Materi berhasil diedit" : "Materi berhasil dibuat");
+  }
+
+  function saveQuestionItem() {
+    if (!canEditLearning) {
+      return;
+    }
+
+    const nextModule = {
+      ...questionDraft,
+      id: editingQuestionId ?? `question-${Date.now()}`,
+      type: "Soal" as const,
+      title: questionDraft.title.trim() || "Soal baru",
+      description:
+        questionDraft.description.trim() ||
+        "Soal memakai Google Form dan response masuk Google Spreadsheet.",
+      formUrl: questionDraft.formUrl?.trim() || googleFormsCreateUrl,
+      sheetUrl: questionDraft.sheetUrl?.trim() || googleSheetsCreateUrl,
+      corrected: "Google Form siap dibuka",
+    };
+
+    setModules((current) =>
+      editingQuestionId
+        ? current.map((module) => (module.id === editingQuestionId ? nextModule : module))
+        : [nextModule, ...current],
+    );
+    setEditingQuestionId(null);
+    setNotice(editingQuestionId ? "Soal berhasil diedit" : "Soal Google Form berhasil dibuat");
+  }
+
+  function editLearningItem(module: LearningState) {
+    if (module.type === "Materi") {
+      setMaterialDraft(module);
+      setEditingMaterialId(module.id);
+      setEditingQuestionId(null);
+    } else {
+      setQuestionDraft(module);
+      setEditingQuestionId(module.id);
+      setEditingMaterialId(null);
+    }
+  }
+
+  function automaticCorrection(moduleId: string) {
+    setModules((current) =>
+      current.map((module) =>
+        module.id === moduleId
+          ? {
+              ...module,
+              progress: module.type === "Soal" ? 100 : module.progress,
+              score: module.type === "Soal" ? Math.min(100, Math.max(75, module.score + 18)) : module.score,
+              corrected:
+                module.type === "Soal"
+                  ? "Google Form auto correction selesai"
+                  : "Materi tidak membutuhkan koreksi soal",
+            }
+          : module,
+      ),
+    );
+    setNotice("Koreksi otomatis diperbarui");
+  }
+
+  function markMaterialOpened(moduleId: string) {
+    setModules((current) =>
+      current.map((module) =>
+        module.id === moduleId
+          ? { ...module, progress: Math.max(module.progress, 100), corrected: "Materi sudah dibuka" }
+          : module,
+      ),
+    );
+  }
+
+  function materialDownloadHref(module: LearningState) {
+    if (module.materialDownloadUrl) {
+      return module.materialDownloadUrl;
+    }
+
+    const body = module.materialBody?.trim() || module.description;
+    return `data:text/plain;charset=utf-8,${encodeURIComponent(body)}`;
+  }
+
   return (
-    <Panel>
-      <PanelTitle icon={GraduationCap} eyebrow="E-Learning" title="Materi dan quiz" />
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        {learningModules.map((module) => (
-          <div key={module.title} className="rounded-lg border border-stone-200 bg-white p-4">
-            <p className="text-sm font-semibold">{module.title}</p>
-            <p className="mt-1 text-xs text-stone-500">{module.quiz}</p>
-            <div className="mt-4 h-2 rounded-full bg-stone-100">
-              <div
-                className="h-2 rounded-full bg-amber-500"
-                style={{ width: `${module.progress}%` }}
+    <section className="grid gap-4 xl:grid-cols-[0.88fr_1.12fr]">
+      <div className="grid gap-4">
+        <Panel>
+          <PanelTitle icon={FileText} eyebrow="Create materi" title="Upload dan download materi" />
+          <div className="mt-4 grid gap-3">
+            <Field label="Judul materi">
+              <input
+                name="materialTitle"
+                value={materialDraft.title}
+                onChange={(event) => updateMaterialDraft("title", event.target.value)}
+                disabled={!canEditLearning}
+                className="field disabled:bg-stone-100 disabled:text-stone-400"
               />
-            </div>
+            </Field>
+            <Field label="Upload materi">
+              <input
+                name="materialFile"
+                type="file"
+                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt"
+                onChange={uploadMaterial}
+                disabled={!canEditLearning}
+                className="field file:mr-3 file:rounded-md file:border-0 file:bg-stone-950 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white disabled:bg-stone-100 disabled:text-stone-400"
+              />
+            </Field>
+            <Field label="Ringkasan materi">
+              <textarea
+                name="materialDescription"
+                value={materialDraft.description}
+                onChange={(event) => updateMaterialDraft("description", event.target.value)}
+                disabled={!canEditLearning}
+                className="field min-h-20 resize-none disabled:bg-stone-100 disabled:text-stone-400"
+              />
+            </Field>
             <button
               type="button"
-              onClick={() => startQuiz(module.title)}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+              onClick={saveMaterialItem}
+              disabled={!canEditLearning}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
             >
-              <Play className="size-3" aria-hidden="true" />
-              Mulai quiz
+              <Plus className="size-4" aria-hidden="true" />
+              {editingMaterialId ? "Simpan materi" : "Create materi"}
             </button>
           </div>
-        ))}
+        </Panel>
+
+        <Panel>
+          <PanelTitle icon={FileSpreadsheet} eyebrow="Create soal" title="Integrasi Google Form" />
+          <div className="mt-4 grid gap-3">
+            <Field label="Judul soal">
+              <input
+                name="questionTitle"
+                value={questionDraft.title}
+                onChange={(event) => updateQuestionDraft("title", event.target.value)}
+                disabled={!canEditLearning}
+                className="field disabled:bg-stone-100 disabled:text-stone-400"
+              />
+            </Field>
+            <Field label="Link Google Form">
+              <input
+                name="questionFormUrl"
+                value={questionDraft.formUrl}
+                onChange={(event) => updateQuestionDraft("formUrl", event.target.value)}
+                disabled={!canEditLearning}
+                className="field disabled:bg-stone-100 disabled:text-stone-400"
+                placeholder="https://docs.google.com/forms/..."
+              />
+            </Field>
+            <Field label="Google Sheet jawaban">
+              <input
+                name="questionSheetUrl"
+                value={questionDraft.sheetUrl}
+                onChange={(event) => updateQuestionDraft("sheetUrl", event.target.value)}
+                disabled={!canEditLearning}
+                className="field disabled:bg-stone-100 disabled:text-stone-400"
+                placeholder="https://docs.google.com/spreadsheets/..."
+              />
+            </Field>
+            <Field label="Instruksi">
+              <textarea
+                name="questionDescription"
+                value={questionDraft.description}
+                onChange={(event) => updateQuestionDraft("description", event.target.value)}
+                disabled={!canEditLearning}
+                className="field min-h-20 resize-none disabled:bg-stone-100 disabled:text-stone-400"
+              />
+            </Field>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <a
+                href={googleFormsCreateUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-semibold hover:bg-stone-100"
+              >
+                <FileSpreadsheet className="size-4" aria-hidden="true" />
+                Buat Form
+              </a>
+              <button
+                type="button"
+                onClick={saveQuestionItem}
+                disabled={!canEditLearning}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+              >
+                <Plus className="size-4" aria-hidden="true" />
+                {editingQuestionId ? "Simpan soal" : "Create soal"}
+              </button>
+            </div>
+            {!canEditLearning && (
+              <p className="rounded-lg bg-stone-100 p-3 text-xs font-semibold text-stone-500">
+                Create dan edit materi/soal hanya untuk Guru. Siswa dan Client tetap bisa membuka materi atau soal yang tersedia.
+              </p>
+            )}
+          </div>
+        </Panel>
       </div>
-    </Panel>
+
+      <Panel>
+        <PanelTitle icon={BookOpenCheck} eyebrow="E-Learning" title="Materi dan soal aktif" />
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {modules.map((module) => (
+            <div key={module.id} className="rounded-lg border border-stone-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">{module.title}</p>
+                  <p className="mt-1 text-xs text-stone-500">
+                    {module.type} | {module.description}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-md px-2 py-1 text-xs font-bold ${
+                    module.type === "Materi"
+                      ? "bg-cyan-100 text-cyan-900"
+                      : "bg-emerald-100 text-emerald-800"
+                  }`}
+                >
+                  {module.type === "Materi" ? "Download" : `Score ${module.score}`}
+                </span>
+              </div>
+              <div className="mt-4 h-2 rounded-full bg-stone-100">
+                <div
+                  className="h-2 rounded-full bg-amber-500"
+                  style={{ width: `${module.progress}%` }}
+                />
+              </div>
+              <p className="mt-3 text-xs font-semibold text-stone-500">
+                {module.corrected}
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {module.type === "Materi" ? (
+                  <a
+                    href={materialDownloadHref(module)}
+                    download={module.materialFileName ?? `${module.title}.txt`}
+                    onClick={() => markMaterialOpened(module.id)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                  >
+                    <Download className="size-3" aria-hidden="true" />
+                    Download materi
+                  </a>
+                ) : (
+                  <>
+                    <a
+                      href={module.formUrl?.trim() || googleFormsCreateUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                    >
+                      <Play className="size-3" aria-hidden="true" />
+                      Buka soal
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => automaticCorrection(module.id)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                    >
+                      <CheckCircle2 className="size-3" aria-hidden="true" />
+                      Automatic correction
+                    </button>
+                    <a
+                      href={module.sheetUrl?.trim() || googleSheetsCreateUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                    >
+                      <FileSpreadsheet className="size-3" aria-hidden="true" />
+                      Sheet jawaban
+                    </a>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => editLearningItem(module)}
+                  disabled={!canEditLearning}
+                  className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                >
+                  <Edit3 className="size-3" aria-hidden="true" />
+                  Edit
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </section>
   );
 }
 
 function AnalyticsWorkspace() {
+  const [sheetUrl, setSheetUrl] = useState("https://docs.google.com/spreadsheets/create");
+  const weeklyProgress = [42, 58, 71, 86];
+  const projectHealth = [
+    {
+      project: "Kanopi baja ringan B-21",
+      owner: "Guru QC",
+      progress: "78%",
+      issue: "Cat finishing belum rata",
+      status: "Butuh follow-up",
+    },
+    {
+      project: "Workbench Lab Las",
+      owner: "Siswa",
+      progress: "64%",
+      issue: "Material menunggu stok",
+      status: "On track",
+    },
+    {
+      project: "Pagar workshop sekolah",
+      owner: "Client",
+      progress: "0%",
+      issue: "Order baru",
+      status: "Menunggu approve",
+    },
+  ];
+
+  function exportAnalyticsCsv() {
+    downloadCsvFile("welddesign-google-spreadsheet.csv", [
+      ["Sheet", "Nama", "Nilai", "Catatan"],
+      ...analyticsRows.map((row) => ["Analytics", row.label, row.value, row.trend]),
+      ...projectHealth.map((row) => [
+        "Projects",
+        row.project,
+        row.progress,
+        `${row.status} - ${row.issue}`,
+      ]),
+    ]);
+  }
+
   return (
-    <Panel>
-      <PanelTitle icon={BarChart3} eyebrow="Analytics" title="Performa produksi" />
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {analyticsRows.map((row) => (
-          <div
-            key={row.label}
-            className="rounded-lg border border-stone-200 bg-white p-4"
-          >
-            <p className="text-sm font-semibold">{row.label}</p>
-            <p className="mt-3 text-2xl font-bold">{row.value}</p>
-            <span className="mt-3 inline-block rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
-              {row.trend}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
-        {[82, 67, 93, 74].map((value, index) => (
-          <div key={value} className="rounded-lg border border-stone-200 bg-white p-3">
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
-              Minggu {index + 1}
-            </p>
-            <div className="mt-3 h-28 rounded-lg bg-stone-100 p-2">
-              <div
-                className="mt-auto rounded-md bg-stone-950"
-                style={{ height: `${value}%` }}
+    <section className="grid gap-4">
+      <Panel>
+        <PanelTitle icon={FileSpreadsheet} eyebrow="Google Spreadsheet" title="Pusat data wajib" />
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid gap-3">
+            <Field label="Link Google Spreadsheet">
+              <input
+                name="analyticsSheetUrl"
+                value={sheetUrl}
+                onChange={(event) => setSheetUrl(event.target.value)}
+                className="field"
+                placeholder="https://docs.google.com/spreadsheets/..."
               />
+            </Field>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <a
+                href={sheetUrl.trim() || "https://docs.google.com/spreadsheets/create"}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-semibold hover:bg-stone-100"
+              >
+                <FileSpreadsheet className="size-4" aria-hidden="true" />
+                Open Google Sheet
+              </a>
+              <button
+                type="button"
+                onClick={exportAnalyticsCsv}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
+              >
+                <Download className="size-4" aria-hidden="true" />
+                Export CSV
+              </button>
             </div>
           </div>
-        ))}
-      </div>
-    </Panel>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <MiniStatus label="Data source" value="Google Sheet" />
+            <MiniStatus label="OTP" value="Tidak wajib" />
+            <MiniStatus label="OpenAI key" value="Tidak dipakai" />
+          </div>
+        </div>
+      </Panel>
+
+      <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+        <Panel>
+          <PanelTitle icon={BarChart3} eyebrow="Analytics" title="Ringkasan performa" />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {analyticsRows.map((row) => (
+              <div
+                key={row.label}
+                className="rounded-lg border border-stone-200 bg-white p-4"
+              >
+                <p className="text-sm font-semibold">{row.label}</p>
+                <p className="mt-3 text-2xl font-bold">{row.value}</p>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <span className="rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
+                    {row.trend}
+                  </span>
+                  <span className="text-right text-xs font-semibold text-stone-500">
+                    {row.source}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+            <p className="text-sm font-semibold">Progress mingguan dari Sheet</p>
+            <div className="mt-4 flex h-32 items-end gap-3">
+              {weeklyProgress.map((value, index) => (
+                <div key={value} className="flex flex-1 flex-col items-center gap-2">
+                  <div className="flex h-24 w-full items-end rounded-lg bg-stone-100 p-2">
+                    <div
+                      className="w-full rounded-md bg-stone-950"
+                      style={{ height: `${value}%` }}
+                    />
+                  </div>
+                  <p className="text-xs font-bold text-stone-500">M{index + 1}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Panel>
+
+        <Panel>
+          <PanelTitle icon={Activity} eyebrow="Operasional" title="Tabel kesehatan proyek" />
+          <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
+            <div className="grid grid-cols-[1.2fr_0.7fr_0.5fr_1fr] gap-3 bg-stone-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+              <span>Project</span>
+              <span>Owner</span>
+              <span>Progress</span>
+              <span>Status</span>
+            </div>
+            {projectHealth.map((row) => (
+              <div
+                key={row.project}
+                className="grid grid-cols-[1.2fr_0.7fr_0.5fr_1fr] gap-3 border-t border-stone-100 px-3 py-3 text-sm"
+              >
+                <div>
+                  <p className="font-semibold">{row.project}</p>
+                  <p className="mt-1 text-xs text-red-700">{row.issue}</p>
+                </div>
+                <span className="text-stone-600">{row.owner}</span>
+                <span className="font-semibold">{row.progress}</span>
+                <span className="text-stone-600">{row.status}</span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </section>
+    </section>
   );
 }
 
@@ -1998,45 +2547,355 @@ function ClientWorkspace({
   selectedRole,
   projectStageList,
   approveStage,
+  setNotice,
 }: {
   selectedRole: Role;
   projectStageList: ProjectStageState[];
   approveStage: (stageName: string) => void;
+  setNotice: (notice: string) => void;
 }) {
   const canApprove = canAccess(selectedRole, "project:approve");
+  const canManageClientOrder = selectedRole !== "CLIENT";
+  const [orders, setOrders] = useState<ClientOrderState[]>([
+    {
+      id: "order-1",
+      title: "Kanopi baja ringan B-21",
+      client: "Client Portal",
+      issue: "Order baru menunggu survey dan approval tim.",
+      status: "Order baru",
+      progress: 0,
+      approved: false,
+      accepted: false,
+    },
+  ]);
+  const [draftOrder, setDraftOrder] = useState({
+    title: "Pagar workshop sekolah",
+    client: currentClientLabel(selectedRole),
+    issue: "Butuh estimasi dan jadwal survey.",
+  });
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+
+  function createOrder() {
+    const existingOrder = editingOrderId
+      ? orders.find((order) => order.id === editingOrderId)
+      : null;
+    const nextOrder: ClientOrderState = {
+      id: editingOrderId ?? `order-${Date.now()}`,
+      title: draftOrder.title.trim() || "Order baru",
+      client: draftOrder.client.trim() || "Client",
+      issue: draftOrder.issue.trim() || "Belum ada catatan masalah.",
+      status: editingOrderId ? existingOrder?.status ?? "Order diedit" : "Order baru",
+      progress: editingOrderId ? existingOrder?.progress ?? 0 : 0,
+      approved: editingOrderId ? existingOrder?.approved ?? false : false,
+      accepted: editingOrderId ? existingOrder?.accepted ?? false : false,
+    };
+
+    setOrders((current) =>
+      editingOrderId
+        ? current.map((order) => (order.id === editingOrderId ? nextOrder : order))
+        : [nextOrder, ...current],
+    );
+    setEditingOrderId(null);
+    setNotice(editingOrderId ? "Order berhasil diedit" : "Order client dibuat");
+  }
+
+  function editOrder(order: ClientOrderState) {
+    if (!canManageClientOrder) {
+      return;
+    }
+
+    setDraftOrder({
+      title: order.title,
+      client: order.client,
+      issue: order.issue,
+    });
+    setEditingOrderId(order.id);
+  }
+
+  function updateOrderProgress(orderId: string, progress: number) {
+    if (!canManageClientOrder) {
+      return;
+    }
+
+    setOrders((current) =>
+      current.map((order) =>
+        order.id === orderId
+          ? {
+              ...order,
+              progress,
+              accepted: false,
+              status: progress >= 100 ? "Siap finish" : "Progress diperbarui",
+            }
+          : order,
+      ),
+    );
+  }
+
+  function finishOrder(orderId: string) {
+    if (!canManageClientOrder) {
+      return;
+    }
+
+    setOrders((current) =>
+      current.map((order) =>
+        order.id === orderId
+          ? {
+              ...order,
+              progress: 100,
+              accepted: false,
+              status: "Menunggu persetujuan aman dari client",
+            }
+          : order,
+      ),
+    );
+    setNotice("Order difinish. Client wajib menerima bahwa barang aman.");
+  }
+
+  function approveOrder(orderId: string) {
+    if (!canManageClientOrder) {
+      return;
+    }
+
+    setOrders((current) =>
+      current.map((order) =>
+        order.id === orderId
+          ? { ...order, approved: true, status: "Order diterima tim" }
+          : order,
+      ),
+    );
+    setNotice("Order disetujui oleh tim");
+  }
+
+  function acceptSafeOrder(orderId: string) {
+    if (selectedRole !== "CLIENT") {
+      return;
+    }
+
+    setOrders((current) =>
+      current.map((order) =>
+        order.id === orderId
+          ? {
+              ...order,
+              accepted: true,
+              status: "Client menyetujui barang aman",
+            }
+          : order,
+      ),
+    );
+    setNotice("Client menerima dan menyetujui barang aman");
+  }
 
   return (
-    <Panel>
-      <PanelTitle icon={ClipboardList} eyebrow="Client Portal" title="Laporan real-time" />
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {projectStageList.map((stage) => (
-          <div key={stage.name} className="rounded-lg border border-stone-200 bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold">{stage.name}</p>
-                <p className="mt-1 text-xs text-stone-500">{stage.state}</p>
+    <section className="grid gap-4 xl:grid-cols-[0.74fr_1.26fr]">
+      <Panel>
+        <PanelTitle
+          icon={ClipboardList}
+          eyebrow="Client Portal"
+          title={editingOrderId ? "Edit order" : "Create order"}
+        />
+        <div className="mt-4 grid gap-3">
+          <input
+            name="clientOrderTitle"
+            value={draftOrder.title}
+            onChange={(event) =>
+              setDraftOrder((current) => ({ ...current, title: event.target.value }))
+            }
+            className="field"
+            placeholder="Judul order"
+          />
+          <input
+            name="clientOrderName"
+            value={draftOrder.client}
+            onChange={(event) =>
+              setDraftOrder((current) => ({ ...current, client: event.target.value }))
+            }
+            className="field"
+            placeholder="Nama client"
+          />
+          <textarea
+            name="clientOrderIssue"
+            value={draftOrder.issue}
+            onChange={(event) =>
+              setDraftOrder((current) => ({ ...current, issue: event.target.value }))
+            }
+            className="field min-h-28 resize-none"
+            placeholder="Kerusakan atau masalah"
+          />
+          <button
+            type="button"
+            onClick={createOrder}
+            disabled={Boolean(editingOrderId) && !canManageClientOrder}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            {editingOrderId ? "Simpan order" : "Create order"}
+          </button>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-stone-200 bg-white p-3">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+            Progress view proyek berjalan
+          </p>
+          <div className="mt-3 space-y-3">
+            {projectStageList.map((stage) => (
+              <div key={stage.name}>
+                <div className="flex items-center justify-between gap-3 text-xs font-semibold">
+                  <span>{stage.name}</span>
+                  <span>{stage.progress}%</span>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-stone-100">
+                  <div
+                    className="h-2 rounded-full bg-emerald-500"
+                    style={{ width: `${stage.progress}%` }}
+                  />
+                </div>
               </div>
-              <span className="text-sm font-bold">{stage.progress}%</span>
-            </div>
-            <div className="mt-3 h-2 rounded-full bg-stone-100">
-              <div
-                className="h-2 rounded-full bg-emerald-500"
-                style={{ width: `${stage.progress}%` }}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => approveStage(stage.name)}
-              disabled={!canApprove}
-              className="mt-4 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
-            >
-              Approve client
-            </button>
+            ))}
           </div>
-        ))}
-      </div>
-    </Panel>
+        </div>
+      </Panel>
+
+      <Panel>
+        <PanelTitle icon={Activity} eyebrow="Order" title="Progress, masalah, approval" />
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {orders.map((order) => (
+            <article key={order.id} className="rounded-lg border border-stone-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">{order.title}</p>
+                  <p className="mt-1 text-xs text-stone-500">
+                    {order.client} | {order.status}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-md px-2 py-1 text-xs font-bold ${
+                    order.accepted
+                      ? "bg-emerald-100 text-emerald-800"
+                      : order.approved
+                        ? "bg-cyan-100 text-cyan-900"
+                      : "bg-amber-100 text-amber-900"
+                  }`}
+                >
+                  {order.accepted ? "Accepted safe" : order.approved ? "Approved" : "Pending"}
+                </span>
+              </div>
+
+              <div className="mt-4">
+                <div className="flex items-center justify-between gap-3 text-xs font-semibold">
+                  <span>Progress view</span>
+                  <span>{order.progress}%</span>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-stone-100">
+                  <div
+                    className="h-2 rounded-full bg-emerald-500"
+                    style={{ width: `${order.progress}%` }}
+                  />
+                </div>
+                {canManageClientOrder && (
+                  <input
+                    aria-label={`Edit progress ${order.title}`}
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={order.progress}
+                    onChange={(event) =>
+                      updateOrderProgress(order.id, Number(event.target.value))
+                    }
+                    className="mt-3 w-full accent-stone-950"
+                  />
+                )}
+              </div>
+
+              <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-900">
+                <p className="text-xs font-bold uppercase tracking-[0.12em]">
+                  Kerusakan / masalah
+                </p>
+                <p className="mt-1 leading-6">{order.issue}</p>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => editOrder(order)}
+                  disabled={!canManageClientOrder}
+                  className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Edit3 className="size-3" aria-hidden="true" />
+                  Edit order
+                </button>
+                <button
+                  type="button"
+                  onClick={() => finishOrder(order.id)}
+                  disabled={!canManageClientOrder}
+                  className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Finish
+                </button>
+                <button
+                  type="button"
+                  onClick={() => approveOrder(order.id)}
+                  disabled={!canManageClientOrder}
+                  className="rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                >
+                  Approve accept order
+                </button>
+                {selectedRole === "CLIENT" && (
+                  <button
+                    type="button"
+                    onClick={() => acceptSafeOrder(order.id)}
+                    disabled={order.progress < 100 || order.accepted}
+                    className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                  >
+                    Terima barang aman
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="mt-4 rounded-lg border border-stone-200 bg-white p-3">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+            Approval tahapan proyek
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {projectStageList.map((stage) => (
+              <button
+                key={stage.name}
+                type="button"
+                onClick={() => approveStage(stage.name)}
+                disabled={!canApprove}
+                className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Approve {stage.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </Panel>
+    </section>
   );
+}
+
+function currentClientLabel(role: Role) {
+  return role === "CLIENT" ? "Client baru" : `${roleLabels[role]} internal`;
+}
+
+function downloadCsvFile(fileName: string, rows: string[][]) {
+  const csv = rows
+    .map((row) =>
+      row
+        .map((cell) => `"${String(cell).replaceAll('"', '""')}"`)
+        .join(","),
+    )
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function MobileWorkspace({ setNotice }: { setNotice: (notice: string) => void }) {

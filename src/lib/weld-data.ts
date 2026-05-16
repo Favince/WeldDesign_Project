@@ -20,9 +20,9 @@ export const dashboardStats = [
     tone: "border-red-300 bg-red-50 text-red-950",
   },
   {
-    label: "AI scan",
-    value: "126",
-    delta: "91% lolos QC",
+    label: "Order client",
+    value: "14",
+    delta: "6 menunggu approval",
     tone: "border-cyan-300 bg-cyan-50 text-cyan-950",
   },
 ] as const;
@@ -57,20 +57,6 @@ export const featureModules = [
     metric: "18 aktif",
   },
   {
-    id: "ai-weld",
-    title: "AI Identifikasi Las",
-    owner: "Siswa",
-    status: "Mock inference",
-    metric: "Confidence score",
-  },
-  {
-    id: "design",
-    title: "AI Generator DKV",
-    owner: "Siswa",
-    status: "Prompt studio",
-    metric: "Poster/blueprint",
-  },
-  {
     id: "portfolio",
     title: "Portofolio Siswa",
     owner: "Siswa",
@@ -95,15 +81,15 @@ export const featureModules = [
     id: "learning",
     title: "E-Learning",
     owner: "Guru",
-    status: "Quiz module",
-    metric: "3 materi",
+    status: "Materi + Google Form",
+    metric: "Sheet response",
   },
   {
     id: "analytics",
     title: "Analytics",
     owner: "Admin",
-    status: "Dashboard",
-    metric: "Biaya rata-rata",
+    status: "Google Sheet",
+    metric: "CSV-ready",
   },
   {
     id: "mobile",
@@ -190,27 +176,6 @@ export const maintenanceEvents = [
   { date: "25 Mei", title: "Refill argon dan CO2", assignee: "Admin" },
 ] as const;
 
-export const scanSamples = [
-  {
-    title: "Fillet weld corner joint",
-    result: "Undercut ringan",
-    confidence: 87,
-    recommendation: "Turunkan travel speed dan ulang pass tipis pada sisi toe.",
-  },
-  {
-    title: "Butt joint root pass",
-    result: "Porosity spot",
-    confidence: 82,
-    recommendation: "Bersihkan permukaan, cek kelembapan elektroda, dan rescan.",
-  },
-  {
-    title: "Lap joint GMAW",
-    result: "Accepted",
-    confidence: 94,
-    recommendation: "Masuk tahap finishing, simpan foto sebagai bukti QC.",
-  },
-] as const;
-
 export const socialPosts = [
   {
     platform: "Instagram",
@@ -227,7 +192,7 @@ export const socialPosts = [
   {
     platform: "Instagram",
     time: "Senin 07.15",
-    caption: "Poster safety welding DKV",
+    caption: "Poster safety welding",
     engagement: "6,9%",
   },
 ] as const;
@@ -242,7 +207,7 @@ export const portfolioItems = [
   },
   {
     student: "Nadia Safira",
-    major: "DKV",
+    major: "Desain Produk",
     title: "Poster safety SMAW",
     rating: 4.7,
     year: "2026",
@@ -257,16 +222,68 @@ export const portfolioItems = [
 ] as const;
 
 export const learningModules = [
-  { title: "Dasar K3 Pengelasan", progress: 88, quiz: "12 soal" },
-  { title: "Cacat Las dan QC Visual", progress: 64, quiz: "18 soal" },
-  { title: "Branding Proyek DKV", progress: 71, quiz: "10 soal" },
+  {
+    kind: "Materi",
+    title: "Dasar K3 Pengelasan",
+    description: "PDF/teks materi K3 untuk siswa sebelum praktik.",
+    progress: 88,
+    score: 0,
+    materialFileName: "dasar-k3-pengelasan.txt",
+    materialBody:
+      "Dasar K3 Pengelasan: APD lengkap, ventilasi area, pengecekan kabel massa, dan prosedur darurat workshop.",
+    formUrl: "",
+    sheetUrl: "",
+  },
+  {
+    kind: "Soal",
+    title: "Soal Cacat Las dan QC Visual",
+    description: "Quiz Google Form dengan koreksi otomatis dan response Sheet.",
+    progress: 64,
+    score: 80,
+    materialFileName: "",
+    materialBody: "",
+    formUrl: "https://docs.google.com/forms/create",
+    sheetUrl: "https://docs.google.com/spreadsheets/create",
+  },
+  {
+    kind: "Materi",
+    title: "Dokumentasi Proyek Las",
+    description: "Template laporan before-after dan checklist portofolio.",
+    progress: 71,
+    score: 0,
+    materialFileName: "dokumentasi-proyek-las.txt",
+    materialBody:
+      "Dokumentasi proyek las: foto before-after, catatan material, progres harian, masalah, solusi, dan approval akhir.",
+    formUrl: "",
+    sheetUrl: "",
+  },
 ] as const;
 
 export const analyticsRows = [
-  { label: "Biaya rata-rata project", value: "Rp 10,2 jt", trend: "+6%" },
-  { label: "Waktu pengerjaan rata-rata", value: "6,4 hari", trend: "-12%" },
-  { label: "Approval client", value: "93%", trend: "+8%" },
-  { label: "Nilai portofolio siswa", value: "4,7/5", trend: "+0,3" },
+  {
+    label: "Order aktif",
+    value: "14",
+    trend: "6 pending",
+    source: "Orders!A:H",
+  },
+  {
+    label: "Progress rata-rata",
+    value: "57%",
+    trend: "+11%",
+    source: "Projects!A:G",
+  },
+  {
+    label: "Masalah aktif",
+    value: "3",
+    trend: "-2 minggu ini",
+    source: "Issues!A:F",
+  },
+  {
+    label: "Approval client",
+    value: "93%",
+    trend: "+8%",
+    source: "Approvals!A:E",
+  },
 ] as const;
 
 export const chatThreads = [
@@ -313,7 +330,7 @@ export const sampleEstimates = [
     result: calculateWeldEstimate(baseEstimate),
   },
   {
-    project: "Workbench DKV Lab",
+    project: "Workbench Lab Las",
     input: {
       ...baseEstimate,
       material: "Stainless Steel",

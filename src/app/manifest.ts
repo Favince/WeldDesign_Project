@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "WeldDesign Production",
     short_name: "WeldDesign",
     description:
-      "Aplikasi produksi las, DKV, inventaris, estimasi biaya, AI inspection, dan client portal.",
+      "Aplikasi produksi las, inventaris, estimasi biaya, portofolio, e-learning, dan client portal.",
     start_url: "/",
     display: "standalone",
     background_color: "#f6f4ee",
