@@ -64,11 +64,11 @@ export const featureModules = [
     metric: "Public link",
   },
   {
-    id: "gallery",
-    title: "Galeri Digital",
-    owner: "Publik",
-    status: "Moderated",
-    metric: "Like/rating",
+    id: "automation",
+    title: "Automation Spreadsheet",
+    owner: "Admin",
+    status: "Apps Script",
+    metric: "Auto Sheet",
   },
   {
     id: "social",

@@ -18,7 +18,6 @@ import {
   Eye,
   FileSpreadsheet,
   FileText,
-  GalleryVerticalEnd,
   HardHat,
   LayoutDashboard,
   LockKeyhole,
@@ -34,11 +33,8 @@ import {
   Share2,
   ShieldCheck,
   Smartphone,
-  Star,
   Save,
   Search,
-  ThumbsDown,
-  ThumbsUp,
   Trash2,
   UserRound,
   X,
@@ -88,7 +84,7 @@ type SectionId =
   | "inventory"
   | "projects"
   | "portfolio"
-  | "gallery"
+  | "automation"
   | "social"
   | "learning"
   | "analytics"
@@ -147,11 +143,11 @@ const navigation: NavItem[] = [
     summary: "Karya siswa, CV-style, upload PDF/video, share link.",
   },
   {
-    id: "gallery",
-    label: "Galeri",
-    icon: GalleryVerticalEnd,
-    permission: "gallery:moderate",
-    summary: "Karya publik dengan like, komentar, rating, filter.",
+    id: "automation",
+    label: "Automation",
+    icon: DatabaseBackup,
+    permission: "automation:manage",
+    summary: "Auto-create Google Spreadsheet lewat Apps Script.",
   },
   {
     id: "social",
@@ -199,6 +195,35 @@ const initialEstimate: EstimateInput = {
   location: "On-site",
   urgency: "Normal",
 };
+
+const defaultSpreadsheetAppsScript = `function doPost(e) {
+  var payload = {};
+  if (e && e.parameter && e.parameter.payload) {
+    payload = JSON.parse(e.parameter.payload);
+  }
+
+  var spreadsheetName = payload.spreadsheetName || "WeldDesign Production Data";
+  var ss = SpreadsheetApp.create(spreadsheetName);
+  var sheets = [
+    { name: "Orders", headers: ["Order ID", "Client", "Status", "Progress", "Issue", "Accepted"] },
+    { name: "Projects", headers: ["Project", "Owner", "Start", "End", "Progress", "State"] },
+    { name: "Inventory", headers: ["Code", "Name", "Condition", "Location", "Age", "Stock"] },
+    { name: "Learning", headers: ["Title", "Type", "Score", "Progress", "Sheet URL"] },
+    { name: "Analytics", headers: ["Metric", "Value", "Trend", "Source"] }
+  ];
+
+  sheets.forEach(function(sheetConfig, index) {
+    var sheet = index === 0 ? ss.getSheets()[0] : ss.insertSheet(sheetConfig.name);
+    sheet.setName(sheetConfig.name);
+    sheet.getRange(1, 1, 1, sheetConfig.headers.length).setValues([sheetConfig.headers]);
+    sheet.setFrozenRows(1);
+  });
+
+  return HtmlService.createHtmlOutput(
+    '<script>window.location.href="' + ss.getUrl() + '";</script>' +
+    '<p>Spreadsheet created: <a target="_blank" href="' + ss.getUrl() + '">' + ss.getUrl() + '</a></p>'
+  );
+}`;
 
 type ApiState =
   | { state: "idle"; message: string }
@@ -250,13 +275,15 @@ type PortfolioState = {
   pdfName: string;
 };
 
-type GalleryItemState = {
+type AutomationState = {
   id: string;
-  title: string;
-  student: string;
-  major: string;
-  year: string;
-  rating: number;
+  name: string;
+  spreadsheetName: string;
+  script: string;
+  webAppUrl: string;
+  status: string;
+  createdAt: string;
+  lastRun: string;
 };
 
 type LearningState = {
@@ -324,9 +351,6 @@ export function WeldDesignApp() {
     caption: "Progress proyek welding siswa Aerovin",
     scheduledAt: "2026-05-18T07:30",
   });
-  const [galleryLikes, setGalleryLikes] = useState<Record<string, number>>(() =>
-    Object.fromEntries(portfolioItems.map((item) => [item.title, Math.round(item.rating * 10)])),
-  );
 
   const selectedRole: Role = currentUser?.role ?? "CLIENT";
   const estimate = useMemo(() => calculateWeldEstimate(estimateInput), [estimateInput]);
@@ -567,10 +591,6 @@ export function WeldDesignApp() {
     setNotice("Jadwal post dihapus");
   }
 
-  function likeGalleryItem(title: string) {
-    setGalleryLikes((likes) => ({ ...likes, [title]: (likes[title] ?? 0) + 1 }));
-  }
-
   if (!isWorkspaceOpen) {
     return (
       <LoginPage
@@ -629,8 +649,6 @@ export function WeldDesignApp() {
           scheduleSocialPost={scheduleSocialPost}
           updateScheduledPost={updateScheduledPost}
           deleteScheduledPost={deleteScheduledPost}
-          galleryLikes={galleryLikes}
-          likeGalleryItem={likeGalleryItem}
           setNotice={setNotice}
         />
       </section>
@@ -802,8 +820,6 @@ function ActiveWorkspace(props: {
   scheduleSocialPost: () => void;
   updateScheduledPost: (originalKey: string, nextPost: SocialPostState) => void;
   deleteScheduledPost: (postKey: string) => void;
-  galleryLikes: Record<string, number>;
-  likeGalleryItem: (title: string) => void;
   setNotice: (notice: string) => void;
 }) {
   const navItem = navigation.find((item) => item.id === props.activeSection) ?? navigation[0];
@@ -857,13 +873,8 @@ function ActiveWorkspace(props: {
       );
     case "portfolio":
       return <PortfolioWorkspace setNotice={props.setNotice} />;
-    case "gallery":
-      return (
-        <GalleryWorkspace
-          galleryLikes={props.galleryLikes}
-          likeGalleryItem={props.likeGalleryItem}
-        />
-      );
+    case "automation":
+      return <AutomationWorkspace setNotice={props.setNotice} />;
     case "social":
       return (
         <SocialWorkspace
@@ -2208,175 +2219,296 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
   );
 }
 
-function GalleryWorkspace({
-  galleryLikes,
-  likeGalleryItem,
-}: {
-  galleryLikes: Record<string, number>;
-  likeGalleryItem: (title: string) => void;
-}) {
-  const [items, setItems] = useState<GalleryItemState[]>(() =>
-    portfolioItems.map((item, index) => ({ id: `gallery-${index}`, ...item })),
+function AutomationWorkspace({ setNotice }: { setNotice: (notice: string) => void }) {
+  const [automations, setAutomations] = useState<AutomationState[]>([
+    {
+      id: "automation-1",
+      name: "WeldDesign Spreadsheet Builder",
+      spreadsheetName: "WeldDesign Production Data",
+      script: defaultSpreadsheetAppsScript,
+      webAppUrl: "",
+      status: "Script siap dipasang ke Apps Script",
+      createdAt: "Default",
+      lastRun: "-",
+    },
+  ]);
+  const [draft, setDraft] = useState<AutomationState>(automations[0]);
+  const [automationQuery, setAutomationQuery] = useState("");
+  const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null);
+  const [viewingAutomationId, setViewingAutomationId] = useState(automations[0]?.id ?? "");
+  const filteredAutomations = automations.filter((automation) =>
+    matchesSearch(
+      automationQuery,
+      automation.name,
+      automation.spreadsheetName,
+      automation.status,
+      automation.webAppUrl,
+    ),
   );
-  const [dislikes, setDislikes] = useState<Record<string, number>>({});
-  const [galleryQuery, setGalleryQuery] = useState("");
-  const [editingGalleryId, setEditingGalleryId] = useState<string | null>(null);
-  const [galleryDraft, setGalleryDraft] = useState<GalleryItemState | null>(null);
-  const [viewingGalleryId, setViewingGalleryId] = useState(items[0]?.id ?? "");
-  const galleryItems = items.filter((item) =>
-    matchesSearch(galleryQuery, item.title, item.student, item.major, item.year, item.rating),
-  );
-  const viewingGallery = items.find((item) => item.id === viewingGalleryId);
+  const viewingAutomation = automations.find((automation) => automation.id === viewingAutomationId);
 
-  function dislikeGalleryItem(title: string) {
-    setDislikes((current) => ({ ...current, [title]: (current[title] ?? 0) + 1 }));
-  }
-
-  function startGalleryEdit(item: GalleryItemState) {
-    setEditingGalleryId(item.id);
-    setGalleryDraft({ ...item });
-  }
-
-  function updateGalleryDraft<K extends keyof GalleryItemState>(
+  function updateAutomationDraft<K extends keyof AutomationState>(
     key: K,
-    value: GalleryItemState[K],
+    value: AutomationState[K],
   ) {
-    setGalleryDraft((current) => (current ? { ...current, [key]: value } : current));
+    setDraft((current) => ({ ...current, [key]: value }));
   }
 
-  function saveGalleryItem() {
-    if (!galleryDraft || !editingGalleryId) {
+  function saveAutomation() {
+    const nextAutomation: AutomationState = {
+      ...draft,
+      id: editingAutomationId ?? `automation-${Date.now()}`,
+      name: draft.name.trim() || "Automation Spreadsheet",
+      spreadsheetName: draft.spreadsheetName.trim() || "WeldDesign Production Data",
+      script: draft.script.trim() || defaultSpreadsheetAppsScript,
+      status: "Script tersimpan",
+      createdAt: editingAutomationId ? draft.createdAt : new Date().toLocaleString("id-ID"),
+    };
+
+    setAutomations((current) =>
+      editingAutomationId
+        ? current.map((automation) =>
+            automation.id === editingAutomationId ? nextAutomation : automation,
+          )
+        : [nextAutomation, ...current],
+    );
+    setViewingAutomationId(nextAutomation.id);
+    setEditingAutomationId(null);
+    setDraft(nextAutomation);
+    setNotice("Automation spreadsheet disimpan");
+  }
+
+  function editAutomation(automation: AutomationState) {
+    setEditingAutomationId(automation.id);
+    setDraft(automation);
+  }
+
+  function deleteAutomation(automationId: string) {
+    setAutomations((current) =>
+      current.filter((automation) => automation.id !== automationId),
+    );
+    setViewingAutomationId((current) => (current === automationId ? "" : current));
+    setEditingAutomationId((current) => (current === automationId ? null : current));
+    setNotice("Automation dihapus");
+  }
+
+  async function copyScript() {
+    try {
+      await navigator.clipboard.writeText(draft.script);
+      setNotice("Apps Script disalin");
+    } catch {
+      setNotice("Browser tidak mengizinkan copy otomatis");
+    }
+  }
+
+  function exportSpreadsheetTemplate() {
+    downloadCsvFile("welddesign-spreadsheet-template.csv", [
+      ["Sheet", "Column 1", "Column 2", "Column 3", "Column 4", "Column 5", "Column 6"],
+      ["Orders", "Order ID", "Client", "Status", "Progress", "Issue", "Accepted"],
+      ["Projects", "Project", "Owner", "Start", "End", "Progress", "State"],
+      ["Inventory", "Code", "Name", "Condition", "Location", "Age", "Stock"],
+      ["Learning", "Title", "Type", "Score", "Progress", "Sheet URL", ""],
+      ["Analytics", "Metric", "Value", "Trend", "Source", "", ""],
+    ]);
+    setNotice("Template spreadsheet CSV dibuat");
+  }
+
+  function runAutomation(automation: AutomationState) {
+    if (!automation.webAppUrl.trim()) {
+      setNotice("Isi Web App URL dari Apps Script dulu");
       return;
     }
 
-    setItems((current) =>
-      current.map((item) => (item.id === editingGalleryId ? galleryDraft : item)),
-    );
-    setEditingGalleryId(null);
-    setGalleryDraft(null);
-  }
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = automation.webAppUrl.trim();
+    form.target = "_blank";
 
-  function deleteGalleryItem(itemId: string) {
-    setItems((current) => current.filter((item) => item.id !== itemId));
-    setViewingGalleryId((current) => (current === itemId ? "" : current));
-    setEditingGalleryId((current) => (current === itemId ? null : current));
+    const payloadInput = document.createElement("input");
+    payloadInput.type = "hidden";
+    payloadInput.name = "payload";
+    payloadInput.value = JSON.stringify({
+      spreadsheetName: automation.spreadsheetName,
+      source: "WeldDesign Production",
+    });
+    form.appendChild(payloadInput);
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+
+    const lastRun = new Date().toLocaleString("id-ID");
+    setAutomations((current) =>
+      current.map((item) =>
+        item.id === automation.id
+          ? { ...item, status: "Request spreadsheet dikirim ke Apps Script", lastRun }
+          : item,
+      ),
+    );
+    setNotice("Automation dijalankan di tab baru");
   }
 
   return (
-    <Panel>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <PanelTitle icon={GalleryVerticalEnd} eyebrow="Galeri Publik" title="Filter dan rating" />
-        <label className="relative lg:w-80">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
-          <input
-            value={galleryQuery}
-            onChange={(event) => setGalleryQuery(event.target.value)}
-            aria-label="Mencari galeri"
-            name="gallerySearch"
-            className="field pl-9"
-            placeholder="Cari galeri..."
-          />
-        </label>
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        {galleryItems.map((item) => {
-          const editing = editingGalleryId === item.id ? galleryDraft : null;
+    <section className="grid gap-4 xl:grid-cols-[0.86fr_1.14fr]">
+      <Panel>
+        <PanelTitle icon={DatabaseBackup} eyebrow="Automation" title="Apps Script to Spreadsheet" />
+        <div className="mt-4 grid gap-3">
+          <Field label="Nama automation">
+            <input
+              name="automationName"
+              value={draft.name}
+              onChange={(event) => updateAutomationDraft("name", event.target.value)}
+              className="field"
+            />
+          </Field>
+          <Field label="Nama spreadsheet">
+            <input
+              name="automationSpreadsheetName"
+              value={draft.spreadsheetName}
+              onChange={(event) =>
+                updateAutomationDraft("spreadsheetName", event.target.value)
+              }
+              className="field"
+            />
+          </Field>
+          <Field label="Web App URL">
+            <input
+              name="automationWebAppUrl"
+              value={draft.webAppUrl}
+              onChange={(event) => updateAutomationDraft("webAppUrl", event.target.value)}
+              className="field"
+              placeholder="https://script.google.com/macros/s/..."
+            />
+          </Field>
+          <Field label="Apps Script">
+            <textarea
+              name="automationScript"
+              value={draft.script}
+              onChange={(event) => updateAutomationDraft("script", event.target.value)}
+              className="field min-h-72 resize-y font-mono text-xs leading-5"
+            />
+          </Field>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={saveAutomation}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
+            >
+              <Save className="size-4" aria-hidden="true" />
+              Simpan automation
+            </button>
+            <button
+              type="button"
+              onClick={copyScript}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-semibold hover:bg-stone-100"
+            >
+              <Copy className="size-4" aria-hidden="true" />
+              Copy Apps Script
+            </button>
+            <a
+              href="https://script.google.com/home/projects/create"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-semibold hover:bg-stone-100"
+            >
+              <FileSpreadsheet className="size-4" aria-hidden="true" />
+              Buka Apps Script
+            </a>
+            <button
+              type="button"
+              onClick={exportSpreadsheetTemplate}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-semibold hover:bg-stone-100"
+            >
+              <Download className="size-4" aria-hidden="true" />
+              Export template CSV
+            </button>
+          </div>
+        </div>
+      </Panel>
 
-          return (
-          <article key={item.id} className="rounded-lg border border-stone-200 bg-white p-4">
-            {editing ? (
-              <div className="grid gap-2">
-                <input value={editing.title} onChange={(event) => updateGalleryDraft("title", event.target.value)} className="field" />
-                <input value={editing.student} onChange={(event) => updateGalleryDraft("student", event.target.value)} className="field" />
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <input value={editing.major} onChange={(event) => updateGalleryDraft("major", event.target.value)} className="field" />
-                  <input value={editing.year} onChange={(event) => updateGalleryDraft("year", event.target.value)} className="field" />
+      <Panel>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <PanelTitle icon={Activity} eyebrow="Run" title="Automation tersimpan" />
+          <label className="relative lg:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+            <input
+              value={automationQuery}
+              onChange={(event) => setAutomationQuery(event.target.value)}
+              aria-label="Mencari automation"
+              name="automationSearch"
+              className="field pl-9"
+              placeholder="Cari automation..."
+            />
+          </label>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {filteredAutomations.map((automation) => (
+            <article key={automation.id} className="rounded-lg border border-stone-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">{automation.name}</p>
+                  <p className="mt-1 text-xs text-stone-500">
+                    {automation.spreadsheetName} | {automation.createdAt}
+                  </p>
                 </div>
-                <button type="button" onClick={saveGalleryItem} className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800">
-                  <Save className="size-3" aria-hidden="true" />
-                  Simpan
+                <span className="rounded-md bg-cyan-100 px-2 py-1 text-xs font-bold text-cyan-900">
+                  {automation.lastRun}
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-stone-600">{automation.status}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingAutomationId(automation.id)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                >
+                  <Eye className="size-3" aria-hidden="true" />
+                  Lihat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => editAutomation(automation)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                >
+                  <Edit3 className="size-3" aria-hidden="true" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => runAutomation(automation)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
+                >
+                  <RefreshCw className="size-3" aria-hidden="true" />
+                  Buat Spreadsheet
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteAutomation(automation.id)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                >
+                  <Trash2 className="size-3" aria-hidden="true" />
+                  Hapus
                 </button>
               </div>
-            ) : (
-              <>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold">{item.title}</p>
-                    <p className="mt-1 text-xs text-stone-500">
-                      {item.major} | {item.year}
-                    </p>
-                  </div>
-                  <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">
-                    <Star className="size-3" aria-hidden="true" />
-                    {item.rating}
-                  </span>
-                </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setViewingGalleryId(item.id)}
-                className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
-              >
-                <Eye className="size-3" aria-hidden="true" />
-                Lihat
-              </button>
-              <button
-                type="button"
-                onClick={() => likeGalleryItem(item.title)}
-                className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
-              >
-                <ThumbsUp className="size-3" aria-hidden="true" />
-                Like {galleryLikes[item.title] ?? 0}
-              </button>
-              <button
-                type="button"
-                onClick={() => dislikeGalleryItem(item.title)}
-                className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
-              >
-                <ThumbsDown className="size-3" aria-hidden="true" />
-                Dislike {dislikes[item.title] ?? 0}
-              </button>
-              <button
-                type="button"
-                onClick={() => startGalleryEdit(item)}
-                className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
-              >
-                <Edit3 className="size-3" aria-hidden="true" />
-                Edit / Simpan
-              </button>
-              <button
-                type="button"
-                onClick={() => deleteGalleryItem(item.id)}
-                className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
-              >
-                <Trash2 className="size-3" aria-hidden="true" />
-                Hapus
-              </button>
-            </div>
-              </>
-            )}
-          </article>
-          );
-        })}
-      </div>
-      <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
-        <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
-          Detail tampil
-        </p>
-        {viewingGallery ? (
-          <p className="mt-3 text-sm text-stone-600">
-            {viewingGallery.title} oleh {viewingGallery.student}, {viewingGallery.major} {viewingGallery.year}, rating {viewingGallery.rating}.
+            </article>
+          ))}
+        </div>
+        <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+            Detail tampil
           </p>
-        ) : (
-          <p className="mt-3 text-sm text-stone-500">Pilih galeri untuk ditampilkan.</p>
-        )}
-      </div>
-      {galleryItems.length === 0 && (
-        <p className="mt-4 rounded-lg border border-stone-200 bg-white p-4 text-sm text-stone-500">
-          Galeri kosong setelah item dihapus.
-        </p>
-      )}
-    </Panel>
+          {viewingAutomation ? (
+            <div className="mt-3 space-y-2 text-sm text-stone-600">
+              <p className="font-semibold text-stone-950">{viewingAutomation.name}</p>
+              <p>Spreadsheet: {viewingAutomation.spreadsheetName}</p>
+              <p>Status: {viewingAutomation.status}</p>
+              <p>Web App URL: {viewingAutomation.webAppUrl || "Belum diisi"}</p>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-stone-500">Pilih automation untuk ditampilkan.</p>
+          )}
+        </div>
+      </Panel>
+    </section>
   );
 }
 
