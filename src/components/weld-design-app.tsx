@@ -23,6 +23,7 @@ import {
   HardHat,
   LayoutDashboard,
   LockKeyhole,
+  LogOut,
   MapPin,
   Megaphone,
   MessageSquareText,
@@ -48,7 +49,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useMemo, useState, type ReactNode } from "react";
-import { AuthPanel } from "@/components/auth/auth-panel";
+import { LoginPage } from "@/components/auth/login-page";
 import { type AppUser } from "@/lib/auth-demo";
 import {
   calculateWeldEstimate,
@@ -268,6 +269,7 @@ type GeneratedAsset = {
 
 export function WeldDesignApp() {
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
+  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [authState, setAuthState] = useState<ApiState>({
     state: "idle",
@@ -373,6 +375,7 @@ export function WeldDesignApp() {
       });
       setNotice(`Login sebagai ${roleLabels[user.role]}`);
       setActiveSection("overview");
+      setIsWorkspaceOpen(true);
     } catch (error) {
       setAuthState({
         state: "error",
@@ -385,7 +388,16 @@ export function WeldDesignApp() {
     setCurrentUser(null);
     setAuthState({ state: "idle", message: "Logout. Role otomatis kembali ke Client." });
     setNotice("Mode Client");
+    setActiveSection("overview");
+    setIsWorkspaceOpen(false);
+  }
+
+  function continueAsClient() {
+    setCurrentUser(null);
+    setAuthState({ state: "idle", message: "Mode Client tanpa login aktif." });
+    setNotice("Mode Client");
     setActiveSection("client");
+    setIsWorkspaceOpen(true);
   }
 
   function updateEstimate<K extends keyof EstimateInput>(key: K, value: EstimateInput[K]) {
@@ -558,125 +570,172 @@ export function WeldDesignApp() {
     setNotice(`Quiz "${title}" dibuka`);
   }
 
+  if (!isWorkspaceOpen) {
+    return (
+      <LoginPage
+        authMessage={authState.message}
+        authState={authState.state}
+        onContinueAsClient={continueAsClient}
+        onSubmit={loginAs}
+      />
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#f5f2eb] text-stone-950">
-      <div className="grid min-h-screen w-full gap-4 p-3 lg:grid-cols-[280px_minmax(0,1fr)] lg:p-4">
-        <aside className="border-line bg-panel flex flex-col gap-4 rounded-lg border p-3 shadow-sm lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]">
-          <div className="flex items-center gap-3 px-1">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-stone-950 text-amber-300">
+      <AdminShellHeader
+        activeSection={activeSection}
+        accessibleModules={accessibleModules}
+        currentUser={currentUser}
+        logout={logout}
+        openSection={openSection}
+        selectedRole={selectedRole}
+      />
+
+      <section className="mx-auto flex w-full max-w-[1480px] flex-col gap-4 px-4 py-6">
+        <Header
+          activeNav={activeNav}
+          selectedRole={selectedRole}
+          currentUser={currentUser}
+          accessibleModules={accessibleModules}
+          notice={notice}
+        />
+
+        <ActiveWorkspace
+          activeSection={activeSection}
+          selectedRole={selectedRole}
+          currentUser={currentUser}
+          openSection={openSection}
+          estimateInput={estimateInput}
+          estimate={estimate}
+          estimateState={estimateState}
+          updateEstimate={updateEstimate}
+          syncEstimate={syncEstimate}
+          projectStageList={projectStageList}
+          approveStage={approveStage}
+          advanceStage={advanceStage}
+          inventoryList={inventoryList}
+          addInventoryDemoItem={addInventoryDemoItem}
+          markInventoryDamaged={markInventoryDamaged}
+          updateInventoryItem={updateInventoryItem}
+          uploadName={uploadName}
+          setUploadName={setUploadName}
+          scanResult={scanResult}
+          scanState={scanState}
+          runWeldScan={runWeldScan}
+          designPrompt={designPrompt}
+          setDesignPrompt={setDesignPrompt}
+          designKind={designKind}
+          setDesignKind={setDesignKind}
+          generatedAssets={generatedAssets}
+          generateDesignAsset={generateDesignAsset}
+          scheduledPosts={scheduledPosts}
+          socialDraft={socialDraft}
+          setSocialDraft={setSocialDraft}
+          scheduleSocialPost={scheduleSocialPost}
+          galleryLikes={galleryLikes}
+          likeGalleryItem={likeGalleryItem}
+          startQuiz={startQuiz}
+          setNotice={setNotice}
+        />
+      </section>
+    </main>
+  );
+}
+
+function AdminShellHeader({
+  activeSection,
+  accessibleModules,
+  currentUser,
+  logout,
+  openSection,
+  selectedRole,
+}: {
+  activeSection: SectionId;
+  accessibleModules: number;
+  currentUser: AppUser | null;
+  logout: () => void;
+  openSection: (section: SectionId) => void;
+  selectedRole: Role;
+}) {
+  const initials = (currentUser?.name ?? "Guest Client")
+    .split(" ")
+    .map((part) => part.charAt(0))
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <header className="sticky top-0 z-30 border-b border-stone-200 bg-[#fffdf8]/95 shadow-[0_1px_2px_rgba(24,23,22,0.08)] backdrop-blur-xl">
+      <div className="mx-auto flex w-full max-w-[1480px] flex-col px-4">
+        <div className="flex min-h-16 items-center gap-4 py-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-stone-950 text-amber-300">
               <HardHat className="size-5" aria-hidden="true" />
             </div>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-stone-500">
-                Aerovin
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">WeldDesign Production</p>
+              <p className="truncate text-xs font-medium text-stone-500">
+                krisavaaerovin.my.id
               </p>
-              <h1 className="text-lg font-semibold leading-tight">WeldDesign</h1>
             </div>
           </div>
 
-          <AuthPanel
-            currentUser={currentUser}
-            selectedRole={selectedRole}
-            authState={authState}
-            loginAs={loginAs}
-            logout={logout}
-          />
-
-          <nav className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible">
-            {navigation.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeSection === item.id;
-              const isAccessible = canAccess(selectedRole, item.permission);
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  title={item.summary}
-                  onClick={() => openSection(item.id)}
-                  className={`group flex min-w-max items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition lg:min-w-0 ${
-                    isActive
-                      ? "bg-stone-950 text-white shadow-sm"
-                      : "text-stone-600 hover:bg-stone-100 hover:text-stone-950"
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon className="size-4 shrink-0" aria-hidden="true" />
-                    <span>{item.label}</span>
-                  </span>
-                  {!isAccessible && (
-                    <LockKeyhole
-                      className={`size-3 shrink-0 ${
-                        isActive ? "text-amber-200" : "text-stone-400"
-                      }`}
-                      aria-hidden="true"
-                    />
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="mt-auto hidden rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-950 lg:block">
-            <p className="text-xs font-bold uppercase tracking-[0.16em]">
-              krisavaaerovin.my.id
-            </p>
-            <p className="mt-2 text-sm font-semibold">{accessibleModules} modul aktif</p>
-            <p className="mt-1 text-xs leading-5 text-emerald-800">
-              Status: {notice}
-            </p>
+          <div className="ml-auto flex min-w-0 items-center gap-3">
+            <div className="hidden rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 md:block">
+              {accessibleModules}/{navigation.length} modul aktif
+            </div>
+            <div className="flex min-w-0 items-center gap-2 rounded-md border border-stone-200 bg-white px-2.5 py-2">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-stone-100 text-xs font-bold text-stone-700">
+                {initials}
+              </div>
+              <div className="hidden min-w-0 sm:block">
+                <p className="truncate text-sm font-semibold">
+                  {currentUser?.name ?? "Guest Client"}
+                </p>
+                <p className="text-xs text-stone-500">{roleLabels[selectedRole]}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={logout}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-stone-200 bg-white px-3 text-sm font-semibold text-stone-700 shadow-sm transition hover:bg-stone-100"
+            >
+              <LogOut className="size-4" aria-hidden="true" />
+              <span className="hidden sm:inline">{currentUser ? "Logout" : "Login"}</span>
+            </button>
           </div>
-        </aside>
+        </div>
 
-        <section className="flex min-w-0 flex-col gap-4">
-          <Header
-            activeNav={activeNav}
-            selectedRole={selectedRole}
-            currentUser={currentUser}
-            accessibleModules={accessibleModules}
-            notice={notice}
-          />
+        <nav className="weld-nav-scroll flex gap-2 overflow-x-auto pb-3 lg:flex-wrap lg:overflow-visible">
+          {navigation.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeSection === item.id;
+            const isAccessible = canAccess(selectedRole, item.permission);
 
-          <ActiveWorkspace
-            activeSection={activeSection}
-            selectedRole={selectedRole}
-            currentUser={currentUser}
-            openSection={openSection}
-            estimateInput={estimateInput}
-            estimate={estimate}
-            estimateState={estimateState}
-            updateEstimate={updateEstimate}
-            syncEstimate={syncEstimate}
-            projectStageList={projectStageList}
-            approveStage={approveStage}
-            advanceStage={advanceStage}
-            inventoryList={inventoryList}
-            addInventoryDemoItem={addInventoryDemoItem}
-            markInventoryDamaged={markInventoryDamaged}
-            updateInventoryItem={updateInventoryItem}
-            uploadName={uploadName}
-            setUploadName={setUploadName}
-            scanResult={scanResult}
-            scanState={scanState}
-            runWeldScan={runWeldScan}
-            designPrompt={designPrompt}
-            setDesignPrompt={setDesignPrompt}
-            designKind={designKind}
-            setDesignKind={setDesignKind}
-            generatedAssets={generatedAssets}
-            generateDesignAsset={generateDesignAsset}
-            scheduledPosts={scheduledPosts}
-            socialDraft={socialDraft}
-            setSocialDraft={setSocialDraft}
-            scheduleSocialPost={scheduleSocialPost}
-            galleryLikes={galleryLikes}
-            likeGalleryItem={likeGalleryItem}
-            startQuiz={startQuiz}
-            setNotice={setNotice}
-          />
-        </section>
+            return (
+              <button
+                key={item.id}
+                type="button"
+                title={item.summary}
+                onClick={() => openSection(item.id)}
+                className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-md border px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 lg:shrink ${
+                  isActive
+                    ? "border-stone-300 bg-white text-stone-950 shadow-sm"
+                    : "border-transparent text-stone-500 hover:bg-white hover:text-stone-950"
+                }`}
+              >
+                <Icon className="size-4" aria-hidden="true" />
+                <span>{item.label}</span>
+                {!isAccessible && (
+                  <LockKeyhole className="size-3 text-stone-400" aria-hidden="true" />
+                )}
+              </button>
+            );
+          })}
+        </nav>
       </div>
-    </main>
+    </header>
   );
 }
 
