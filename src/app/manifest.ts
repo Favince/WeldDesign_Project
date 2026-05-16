@@ -1,0 +1,16 @@
+import type { MetadataRoute } from "next";
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: "WeldDesign Production",
+    short_name: "WeldDesign",
+    description:
+      "Aplikasi produksi las, DKV, inventaris, estimasi biaya, AI inspection, dan client portal.",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#f6f4ee",
+    theme_color: "#181716",
+    categories: ["productivity", "education", "business"],
+    lang: "id",
+  };
+}

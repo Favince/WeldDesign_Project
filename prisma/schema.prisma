@@ -1,0 +1,453 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  GURU
+  SISWA
+  CLIENT
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+  PHONE_OTP
+}
+
+enum ProjectStatus {
+  PLANNED
+  ACTIVE
+  REVIEW
+  COMPLETED
+  HOLD
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum InventoryCondition {
+  GOOD
+  SERVICE_DUE
+  DAMAGED
+  RETIRED
+}
+
+enum StockUnit {
+  KG
+  PCS
+  METER
+  LITER
+}
+
+enum ScanStatus {
+  CLEAN
+  WATCH
+  DEFECTIVE
+}
+
+enum PostPlatform {
+  INSTAGRAM
+  TIKTOK
+}
+
+enum Visibility {
+  PRIVATE
+  PUBLIC
+}
+
+model User {
+  id                  String          @id @default(cuid())
+  name                String
+  email               String?         @unique
+  phone               String?         @unique
+  passwordHash        String?
+  role                Role            @default(SISWA)
+  provider            AuthProvider    @default(EMAIL)
+  twoFactorEnabled    Boolean         @default(false)
+  isBlocked           Boolean         @default(false)
+  failedLoginAttempts Int             @default(0)
+  lastLoginAt         DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  sessions             Session[]
+  otpChallenges        OtpChallenge[]
+  auditLogs            AuditLog[]
+  ownedProjects        Project[]       @relation("ProjectOwner")
+  teacherProjects      Project[]       @relation("ProjectTeacher")
+  clientProjects       Project[]       @relation("ProjectClient")
+  studentProjects      Project[]       @relation("ProjectStudents")
+  projectUpdates       ProjectUpdate[]
+  estimates            Estimate[]
+  inventoryAssignments InventoryItem[] @relation("InventoryAssignments")
+  weldScans            WeldScan[]
+  designAssets         DesignAsset[]
+  portfolioItems       PortfolioItem[]
+  galleryReactions     GalleryReaction[]
+  socialPosts          SocialPost[]
+  quizAttempts         QuizAttempt[]
+  notifications        Notification[]
+  chatThreads          ChatThread[]    @relation("ChatMembers")
+  chatMessages         ChatMessage[]
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  tokenHash    String   @unique
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  lastSeenAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model OtpChallenge {
+  id          String   @id @default(cuid())
+  userId      String?
+  target      String
+  channel     String
+  codeHash    String
+  attempts    Int      @default(0)
+  consumedAt  DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([target])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  ipAddress String?
+  metadata  Json?
+  risk      String   @default("LOW")
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([createdAt])
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  code        String        @unique
+  title       String
+  description String?
+  status      ProjectStatus @default(PLANNED)
+  location    String?
+  gpsLat      Float?
+  gpsLng      Float?
+  budget      Decimal       @default(0)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  ownerId   String
+  teacherId String?
+  clientId  String?
+
+  owner    User   @relation("ProjectOwner", fields: [ownerId], references: [id])
+  teacher  User?  @relation("ProjectTeacher", fields: [teacherId], references: [id], onDelete: SetNull)
+  client   User?  @relation("ProjectClient", fields: [clientId], references: [id], onDelete: SetNull)
+  students User[] @relation("ProjectStudents")
+
+  stages         ProjectStage[]
+  updates        ProjectUpdate[]
+  estimates      Estimate[]
+  weldScans      WeldScan[]
+  designAssets   DesignAsset[]
+  portfolioItems PortfolioItem[]
+  socialPosts    SocialPost[]
+  chatThreads    ChatThread[]
+
+  @@index([status])
+}
+
+model ProjectStage {
+  id          String         @id @default(cuid())
+  projectId   String
+  name        String
+  sortOrder   Int            @default(0)
+  progress    Int            @default(0)
+  approval    ApprovalStatus @default(PENDING)
+  approvedAt  DateTime?
+  startsAt    DateTime?
+  endsAt      DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model ProjectUpdate {
+  id        String   @id @default(cuid())
+  projectId String
+  authorId  String
+  note      String
+  progress  Int?
+  mediaUrls String[]
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@index([projectId])
+}
+
+model Estimate {
+  id             String   @id @default(cuid())
+  projectId      String?
+  userId         String
+  material       String
+  thicknessMm    Float
+  lengthMm       Float
+  weldType       String
+  quantity       Int
+  location       String
+  laborHours     Float
+  consumableKg   Float
+  materialCost   Decimal
+  laborCost      Decimal
+  overheadCost   Decimal
+  logisticsCost  Decimal
+  totalCost      Decimal
+  exportedPdfUrl String?
+  exportedXlsUrl String?
+  createdAt      DateTime @default(now())
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  user    User     @relation(fields: [userId], references: [id])
+
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+model InventoryItem {
+  id             String             @id @default(cuid())
+  code           String             @unique
+  name           String
+  photoUrl       String?
+  condition      InventoryCondition @default(GOOD)
+  location       String
+  purchasedAt    DateTime?
+  assignedUserId String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  assignedUser User?             @relation("InventoryAssignments", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  maintenance  MaintenanceTask[]
+}
+
+model MaterialStock {
+  id          String    @id @default(cuid())
+  sku         String    @unique
+  name        String
+  unit        StockUnit @default(KG)
+  quantity    Float     @default(0)
+  minQuantity Float     @default(0)
+  location    String
+  updatedAt   DateTime  @updatedAt
+}
+
+model MaintenanceTask {
+  id          String         @id @default(cuid())
+  itemId      String
+  title       String
+  dueAt       DateTime
+  completedAt DateTime?
+  notes       String?
+  createdAt   DateTime       @default(now())
+
+  item InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([dueAt])
+}
+
+model WeldScan {
+  id             String     @id @default(cuid())
+  projectId      String?
+  userId         String
+  imageUrl       String
+  detectedType   String
+  status         ScanStatus @default(WATCH)
+  quality        String
+  defects        Json?
+  confidence     Float
+  recommendation String
+  createdAt      DateTime   @default(now())
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  user    User     @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+}
+
+model DesignAsset {
+  id        String     @id @default(cuid())
+  projectId String?
+  userId    String
+  kind      String
+  prompt    String
+  assetUrl  String?
+  metadata  Json?
+  visibility Visibility @default(PRIVATE)
+  createdAt DateTime   @default(now())
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  user    User     @relation(fields: [userId], references: [id])
+}
+
+model PortfolioItem {
+  id          String     @id @default(cuid())
+  studentId   String
+  projectId   String?
+  title       String
+  summary     String?
+  mediaUrls   String[]
+  pdfUrl      String?
+  publicSlug  String     @unique
+  visibility  Visibility @default(PRIVATE)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  student   User              @relation(fields: [studentId], references: [id])
+  project   Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  reactions GalleryReaction[]
+}
+
+model GalleryReaction {
+  id              String   @id @default(cuid())
+  portfolioItemId String
+  userId          String?
+  type            String
+  rating          Int?
+  comment         String?
+  createdAt       DateTime @default(now())
+
+  portfolioItem PortfolioItem @relation(fields: [portfolioItemId], references: [id], onDelete: Cascade)
+  user          User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([portfolioItemId])
+}
+
+model SocialPost {
+  id          String       @id @default(cuid())
+  projectId   String?
+  authorId    String
+  platform    PostPlatform
+  caption     String
+  templateUrl String?
+  mediaUrls   String[]
+  scheduledAt DateTime
+  publishedAt DateTime?
+  analytics   Json?
+  createdAt   DateTime     @default(now())
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  author  User     @relation(fields: [authorId], references: [id])
+
+  @@index([scheduledAt])
+}
+
+model Course {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  category    String
+  lessons     Lesson[]
+  quizzes     Quiz[]
+  createdAt   DateTime @default(now())
+}
+
+model Lesson {
+  id        String   @id @default(cuid())
+  courseId  String
+  title     String
+  content   String
+  videoUrl  String?
+  sortOrder Int      @default(0)
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+}
+
+model Quiz {
+  id        String        @id @default(cuid())
+  courseId  String
+  title     String
+  questions Json
+  attempts  QuizAttempt[]
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+}
+
+model QuizAttempt {
+  id        String   @id @default(cuid())
+  quizId    String
+  userId    String
+  score     Float
+  answers   Json
+  createdAt DateTime @default(now())
+
+  quiz Quiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  channel   String
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model ChatThread {
+  id        String   @id @default(cuid())
+  projectId String?
+  title     String
+  createdAt DateTime @default(now())
+
+  project  Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  members  User[]        @relation("ChatMembers")
+  messages ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  threadId  String
+  userId    String
+  body      String
+  createdAt DateTime @default(now())
+
+  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id])
+
+  @@index([threadId, createdAt])
+}
