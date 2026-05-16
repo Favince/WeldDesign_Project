@@ -15,6 +15,7 @@ import {
   DatabaseBackup,
   Download,
   Edit3,
+  Eye,
   FileSpreadsheet,
   FileText,
   GalleryVerticalEnd,
@@ -35,8 +36,10 @@ import {
   Smartphone,
   Star,
   Save,
+  Search,
   ThumbsDown,
   ThumbsUp,
+  Trash2,
   UserRound,
   X,
   type LucideIcon,
@@ -74,6 +77,7 @@ import {
   maintenanceEvents,
   portfolioItems,
   projectStages,
+  sampleEstimates,
   socialPosts,
 } from "@/lib/weld-data";
 
@@ -227,6 +231,14 @@ type SocialPostState = {
   engagement: string;
 };
 
+type EstimateRecordState = {
+  id: string;
+  project: string;
+  input: EstimateInput;
+  result: EstimateResult;
+  createdAt: string;
+};
+
 type PortfolioState = {
   id: string;
   title: string;
@@ -236,6 +248,15 @@ type PortfolioState = {
   rating: number;
   summary: string;
   pdfName: string;
+};
+
+type GalleryItemState = {
+  id: string;
+  title: string;
+  student: string;
+  major: string;
+  year: string;
+  rating: number;
 };
 
 type LearningState = {
@@ -262,6 +283,14 @@ type ClientOrderState = {
   progress: number;
   approved: boolean;
   accepted: boolean;
+};
+
+type AnalyticsProjectState = {
+  project: string;
+  owner: string;
+  progress: string;
+  issue: string;
+  status: string;
 };
 
 export function WeldDesignApp() {
@@ -452,6 +481,11 @@ export function WeldDesignApp() {
     setNotice(`Tahap "${nextStage.name}" berhasil diedit`);
   }
 
+  function deleteProjectStage(stageName: string) {
+    setProjectStageList((stages) => stages.filter((stage) => stage.name !== stageName));
+    setNotice(`Tahap "${stageName}" dihapus`);
+  }
+
   function markInventoryDamaged(code: string) {
     setInventoryList((items) =>
       items.map((item) =>
@@ -468,6 +502,11 @@ export function WeldDesignApp() {
       ),
     );
     setNotice(`Inventaris ${nextItem.code.trim() || code} berhasil diupdate`);
+  }
+
+  function deleteInventoryItem(code: string) {
+    setInventoryList((items) => items.filter((item) => item.code !== code));
+    setNotice(`Inventaris ${code} dihapus`);
   }
 
   function addInventoryDemoItem() {
@@ -514,6 +553,18 @@ export function WeldDesignApp() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Schedule post gagal");
     }
+  }
+
+  function updateScheduledPost(originalKey: string, nextPost: SocialPostState) {
+    setScheduledPosts((posts) =>
+      posts.map((post) => (socialPostKey(post) === originalKey ? nextPost : post)),
+    );
+    setNotice("Jadwal post berhasil disimpan");
+  }
+
+  function deleteScheduledPost(postKey: string) {
+    setScheduledPosts((posts) => posts.filter((post) => socialPostKey(post) !== postKey));
+    setNotice("Jadwal post dihapus");
   }
 
   function likeGalleryItem(title: string) {
@@ -566,14 +617,18 @@ export function WeldDesignApp() {
           advanceStage={advanceStage}
           regressStage={regressStage}
           updateProjectStage={updateProjectStage}
+          deleteProjectStage={deleteProjectStage}
           inventoryList={inventoryList}
           addInventoryDemoItem={addInventoryDemoItem}
           markInventoryDamaged={markInventoryDamaged}
           updateInventoryItem={updateInventoryItem}
+          deleteInventoryItem={deleteInventoryItem}
           scheduledPosts={scheduledPosts}
           socialDraft={socialDraft}
           setSocialDraft={setSocialDraft}
           scheduleSocialPost={scheduleSocialPost}
+          updateScheduledPost={updateScheduledPost}
+          deleteScheduledPost={deleteScheduledPost}
           galleryLikes={galleryLikes}
           likeGalleryItem={likeGalleryItem}
           setNotice={setNotice}
@@ -735,14 +790,18 @@ function ActiveWorkspace(props: {
   advanceStage: (stageName: string) => void;
   regressStage: (stageName: string) => void;
   updateProjectStage: (stageName: string, nextStage: ProjectStageState) => void;
+  deleteProjectStage: (stageName: string) => void;
   inventoryList: InventoryState[];
   addInventoryDemoItem: () => void;
   markInventoryDamaged: (code: string) => void;
   updateInventoryItem: (code: string, nextItem: InventoryState) => void;
+  deleteInventoryItem: (code: string) => void;
   scheduledPosts: SocialPostState[];
   socialDraft: { platform: string; caption: string; scheduledAt: string };
   setSocialDraft: (draft: { platform: string; caption: string; scheduledAt: string }) => void;
   scheduleSocialPost: () => void;
+  updateScheduledPost: (originalKey: string, nextPost: SocialPostState) => void;
+  deleteScheduledPost: (postKey: string) => void;
   galleryLikes: Record<string, number>;
   likeGalleryItem: (title: string) => void;
   setNotice: (notice: string) => void;
@@ -781,6 +840,7 @@ function ActiveWorkspace(props: {
           addInventoryDemoItem={props.addInventoryDemoItem}
           markInventoryDamaged={props.markInventoryDamaged}
           updateInventoryItem={props.updateInventoryItem}
+          deleteInventoryItem={props.deleteInventoryItem}
         />
       );
     case "projects":
@@ -792,6 +852,7 @@ function ActiveWorkspace(props: {
           advanceStage={props.advanceStage}
           regressStage={props.regressStage}
           updateProjectStage={props.updateProjectStage}
+          deleteProjectStage={props.deleteProjectStage}
         />
       );
     case "portfolio":
@@ -810,6 +871,8 @@ function ActiveWorkspace(props: {
           socialDraft={props.socialDraft}
           setSocialDraft={props.setSocialDraft}
           scheduleSocialPost={props.scheduleSocialPost}
+          updateScheduledPost={props.updateScheduledPost}
+          deleteScheduledPost={props.deleteScheduledPost}
         />
       );
     case "learning":
@@ -1088,8 +1151,66 @@ function EstimatorWorkspace({
   updateEstimate: <K extends keyof EstimateInput>(key: K, value: EstimateInput[K]) => void;
   syncEstimate: () => void;
 }) {
+  const [estimateRecords, setEstimateRecords] = useState<EstimateRecordState[]>(() =>
+    sampleEstimates.map((sample, index) => ({
+      id: `estimate-${index}`,
+      project: sample.project,
+      input: sample.input,
+      result: sample.result,
+      createdAt: "Data awal",
+    })),
+  );
+  const [estimateQuery, setEstimateQuery] = useState("");
+  const [viewingEstimateId, setViewingEstimateId] = useState<string | null>(
+    estimateRecords[0]?.id ?? null,
+  );
+  const filteredEstimates = estimateRecords.filter((record) =>
+    matchesSearch(
+      estimateQuery,
+      record.project,
+      record.input.material,
+      record.input.weldType,
+      record.result.totalCost,
+    ),
+  );
+  const viewingEstimate = estimateRecords.find((record) => record.id === viewingEstimateId);
+
+  function saveEstimateRecord() {
+    const nextRecord: EstimateRecordState = {
+      id: `estimate-${Date.now()}`,
+      project: `${estimateInput.weldType} ${estimateInput.material}`,
+      input: { ...estimateInput },
+      result: estimate,
+      createdAt: new Date().toLocaleString("id-ID", {
+        dateStyle: "short",
+        timeStyle: "short",
+      }),
+    };
+
+    setEstimateRecords((records) => [nextRecord, ...records]);
+    setViewingEstimateId(nextRecord.id);
+    syncEstimate();
+  }
+
+  function editEstimateRecord(record: EstimateRecordState) {
+    updateEstimate("material", record.input.material);
+    updateEstimate("thicknessMm", record.input.thicknessMm);
+    updateEstimate("lengthMm", record.input.lengthMm);
+    updateEstimate("weldType", record.input.weldType);
+    updateEstimate("quantity", record.input.quantity);
+    updateEstimate("location", record.input.location);
+    updateEstimate("urgency", record.input.urgency);
+    setViewingEstimateId(record.id);
+  }
+
+  function deleteEstimateRecord(recordId: string) {
+    setEstimateRecords((records) => records.filter((record) => record.id !== recordId));
+    setViewingEstimateId((current) => (current === recordId ? null : current));
+  }
+
   return (
-    <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+    <section className="grid gap-4">
+      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
       <Panel>
         <PanelTitle icon={CircleDollarSign} eyebrow="Input" title="Parameter estimasi" />
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -1204,7 +1325,7 @@ function EstimatorWorkspace({
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={syncEstimate}
+              onClick={saveEstimateRecord}
               disabled={apiState.state === "loading"}
               className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:opacity-60"
             >
@@ -1235,6 +1356,68 @@ function EstimatorWorkspace({
           </p>
         </div>
       </Panel>
+      </div>
+
+      <Panel>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <PanelTitle icon={FileSpreadsheet} eyebrow="Riwayat" title="Cari, tampilkan, edit, hapus estimasi" />
+          <label className="relative lg:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+            <input
+              value={estimateQuery}
+              onChange={(event) => setEstimateQuery(event.target.value)}
+              aria-label="Mencari estimasi"
+              name="estimateSearch"
+              className="field pl-9"
+              placeholder="Cari estimasi..."
+            />
+          </label>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_0.8fr]">
+          <div className="grid gap-2">
+            {filteredEstimates.map((record) => (
+              <div key={record.id} className="rounded-lg border border-stone-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">{record.project}</p>
+                    <p className="mt-1 text-xs text-stone-500">
+                      {record.input.material} | {record.input.weldType} | {record.createdAt}
+                    </p>
+                  </div>
+                  <span className="text-sm font-bold">{formatRupiah(record.result.totalCost)}</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setViewingEstimateId(record.id)} className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100">
+                    <Eye className="size-3" aria-hidden="true" />
+                    Lihat
+                  </button>
+                  <button type="button" onClick={() => editEstimateRecord(record)} className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100">
+                    <Edit3 className="size-3" aria-hidden="true" />
+                    Edit
+                  </button>
+                  <button type="button" onClick={() => deleteEstimateRecord(record.id)} className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
+                    <Trash2 className="size-3" aria-hidden="true" />
+                    Hapus
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg border border-stone-200 bg-white p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">Detail tampil</p>
+            {viewingEstimate ? (
+              <div className="mt-3 space-y-2 text-sm">
+                <p className="font-semibold">{viewingEstimate.project}</p>
+                <p className="text-stone-600">Material: {viewingEstimate.input.material}</p>
+                <p className="text-stone-600">Jenis las: {viewingEstimate.input.weldType}</p>
+                <p className="text-stone-600">Total: {formatRupiah(viewingEstimate.result.totalCost)}</p>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-stone-500">Pilih estimasi untuk ditampilkan.</p>
+            )}
+          </div>
+        </div>
+      </Panel>
     </section>
   );
 }
@@ -1246,6 +1429,7 @@ function ProjectWorkspace({
   advanceStage,
   regressStage,
   updateProjectStage,
+  deleteProjectStage,
 }: {
   selectedRole: Role;
   projectStageList: ProjectStageState[];
@@ -1253,11 +1437,18 @@ function ProjectWorkspace({
   advanceStage: (stageName: string) => void;
   regressStage: (stageName: string) => void;
   updateProjectStage: (stageName: string, nextStage: ProjectStageState) => void;
+  deleteProjectStage: (stageName: string) => void;
 }) {
   const canUpdate = canAccess(selectedRole, "project:update");
   const canApprove = canAccess(selectedRole, "project:approve");
   const [editingStage, setEditingStage] = useState<string | null>(null);
   const [stageDraft, setStageDraft] = useState<ProjectStageState | null>(null);
+  const [stageQuery, setStageQuery] = useState("");
+  const [viewingStageName, setViewingStageName] = useState(projectStageList[0]?.name ?? "");
+  const filteredStages = projectStageList.filter((stage) =>
+    matchesSearch(stageQuery, stage.name, stage.owner, stage.state, stage.start, stage.end),
+  );
+  const viewingStage = projectStageList.find((stage) => stage.name === viewingStageName);
 
   function startEdit(stage: ProjectStageState) {
     setEditingStage(stage.name);
@@ -1289,9 +1480,30 @@ function ProjectWorkspace({
     cancelEdit();
   }
 
+  function removeStage(stageName: string) {
+    deleteProjectStage(stageName);
+    setViewingStageName((current) => (current === stageName ? "" : current));
+    if (editingStage === stageName) {
+      cancelEdit();
+    }
+  }
+
   return (
     <Panel>
-      <PanelTitle icon={ChartNoAxesGantt} eyebrow="Monitoring" title="Timeline proyek" />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <PanelTitle icon={ChartNoAxesGantt} eyebrow="Monitoring" title="Timeline proyek" />
+        <label className="relative lg:w-80">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+          <input
+            value={stageQuery}
+            onChange={(event) => setStageQuery(event.target.value)}
+            aria-label="Mencari tahap proyek"
+            name="projectStageSearch"
+            className="field pl-9"
+            placeholder="Cari tahap proyek..."
+          />
+        </label>
+      </div>
       <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
         <div className="grid grid-cols-[1fr_78px_86px] gap-3 bg-stone-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-stone-500 md:grid-cols-[1fr_90px_90px_260px]">
           <span>Tahap</span>
@@ -1299,7 +1511,7 @@ function ProjectWorkspace({
           <span>Selesai</span>
           <span className="hidden md:block">Aksi</span>
         </div>
-        {projectStageList.map((stage) => {
+        {filteredStages.map((stage) => {
           const editing = editingStage === stage.name ? stageDraft : null;
 
           return (
@@ -1383,6 +1595,14 @@ function ProjectWorkspace({
                   <div className="col-span-3 flex flex-wrap gap-2 md:col-span-1">
                     <button
                       type="button"
+                      onClick={() => setViewingStageName(stage.name)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+                    >
+                      <Eye className="size-3" aria-hidden="true" />
+                      Lihat
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => advanceStage(stage.name)}
                       disabled={!canUpdate}
                       title={canUpdate ? "Tambah progress" : "Role ini tidak punya project:update"}
@@ -1406,7 +1626,7 @@ function ProjectWorkspace({
                       className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <Edit3 className="size-3" aria-hidden="true" />
-                      Edit
+                      Edit / Simpan
                     </button>
                     <button
                       type="button"
@@ -1416,6 +1636,15 @@ function ProjectWorkspace({
                       className="rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
                     >
                       Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeStage(stage.name)}
+                      disabled={!canUpdate}
+                      className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Trash2 className="size-3" aria-hidden="true" />
+                      Hapus
                     </button>
                   </div>
                 </div>
@@ -1429,6 +1658,23 @@ function ProjectWorkspace({
             </div>
           );
         })}
+      </div>
+      <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+        <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+          Detail tampil
+        </p>
+        {viewingStage ? (
+          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+            <p><span className="font-semibold">Tahap:</span> {viewingStage.name}</p>
+            <p><span className="font-semibold">Owner:</span> {viewingStage.owner}</p>
+            <p><span className="font-semibold">Progress:</span> {viewingStage.progress}%</p>
+            <p><span className="font-semibold">Mulai:</span> {viewingStage.start}</p>
+            <p><span className="font-semibold">Selesai:</span> {viewingStage.end}</p>
+            <p><span className="font-semibold">Status:</span> {viewingStage.state}</p>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-stone-500">Pilih tahap untuk ditampilkan.</p>
+        )}
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <ActionTile icon={Camera} label="Before-after" value="24 media" />
@@ -1445,16 +1691,24 @@ function InventoryWorkspace({
   addInventoryDemoItem,
   markInventoryDamaged,
   updateInventoryItem,
+  deleteInventoryItem,
 }: {
   selectedRole: Role;
   inventoryList: InventoryState[];
   addInventoryDemoItem: () => void;
   markInventoryDamaged: (code: string) => void;
   updateInventoryItem: (code: string, nextItem: InventoryState) => void;
+  deleteInventoryItem: (code: string) => void;
 }) {
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [draftItem, setDraftItem] = useState<InventoryState | null>(null);
+  const [inventoryQuery, setInventoryQuery] = useState("");
+  const [viewingInventoryCode, setViewingInventoryCode] = useState(inventoryList[0]?.code ?? "");
   const canEdit = canAccess(selectedRole, "inventory:manage");
+  const filteredInventory = inventoryList.filter((item) =>
+    matchesSearch(inventoryQuery, item.code, item.name, item.condition, item.location, item.stock),
+  );
+  const viewingInventory = inventoryList.find((item) => item.code === viewingInventoryCode);
 
   function startEdit(item: InventoryState) {
     setEditingCode(item.code);
@@ -1479,23 +1733,44 @@ function InventoryWorkspace({
     cancelEdit();
   }
 
+  function removeInventoryItem(code: string) {
+    deleteInventoryItem(code);
+    setViewingInventoryCode((current) => (current === code ? "" : current));
+    if (editingCode === code) {
+      cancelEdit();
+    }
+  }
+
   return (
     <section className="grid gap-4 xl:grid-cols-[1fr_0.7fr]">
       <Panel>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <PanelTitle icon={Package} eyebrow="Inventaris" title="Alat dan bahan" />
-          <button
-            type="button"
-            onClick={addInventoryDemoItem}
-            disabled={!canEdit}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
-          >
-            <Plus className="size-4" aria-hidden="true" />
-            Tambah item
-          </button>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto] xl:w-[520px]">
+            <label className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+              <input
+                value={inventoryQuery}
+                onChange={(event) => setInventoryQuery(event.target.value)}
+                aria-label="Mencari inventaris"
+                name="inventorySearch"
+                className="field pl-9"
+                placeholder="Cari inventaris..."
+              />
+            </label>
+            <button
+              type="button"
+              onClick={addInventoryDemoItem}
+              disabled={!canEdit}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              Tambah item
+            </button>
+          </div>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {inventoryList.map((item) => {
+          {filteredInventory.map((item) => {
             const editingItem = editingCode === item.code ? draftItem : null;
 
             return (
@@ -1601,12 +1876,20 @@ function InventoryWorkspace({
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
+                        onClick={() => setViewingInventoryCode(item.code)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+                      >
+                        <Eye className="size-4" aria-hidden="true" />
+                        Lihat
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => startEdit(item)}
                         disabled={!canEdit}
                         className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Edit3 className="size-4" aria-hidden="true" />
-                        Edit
+                        Edit / Simpan
                       </button>
                       <button
                         type="button"
@@ -1616,12 +1899,38 @@ function InventoryWorkspace({
                       >
                         Laporkan kerusakan
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => removeInventoryItem(item.code)}
+                        disabled={!canEdit}
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Trash2 className="size-4" aria-hidden="true" />
+                        Hapus
+                      </button>
                     </div>
                   </>
                 )}
               </div>
             );
           })}
+        </div>
+        <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+            Detail tampil
+          </p>
+          {viewingInventory ? (
+            <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+              <p><span className="font-semibold">Nama:</span> {viewingInventory.name}</p>
+              <p><span className="font-semibold">Kode:</span> {viewingInventory.code}</p>
+              <p><span className="font-semibold">Kondisi:</span> {viewingInventory.condition}</p>
+              <p><span className="font-semibold">Lokasi:</span> {viewingInventory.location}</p>
+              <p><span className="font-semibold">Umur:</span> {viewingInventory.age}</p>
+              <p><span className="font-semibold">Stok:</span> {viewingInventory.stock}</p>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-stone-500">Pilih inventaris untuk ditampilkan.</p>
+          )}
         </div>
       </Panel>
 
@@ -1667,6 +1976,12 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
     pdfName: "portfolio-siswa.pdf",
   });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [portfolioQuery, setPortfolioQuery] = useState("");
+  const [viewingPortfolioId, setViewingPortfolioId] = useState(items[0]?.id ?? "");
+  const filteredPortfolios = items.filter((item) =>
+    matchesSearch(portfolioQuery, item.title, item.student, item.major, item.year, item.summary),
+  );
+  const viewingPortfolio = items.find((item) => item.id === viewingPortfolioId);
 
   function updateDraft<K extends keyof PortfolioState>(key: K, value: PortfolioState[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -1709,6 +2024,13 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
   function printPortfolio(item: PortfolioState) {
     setNotice(`Membuka print PDF untuk ${item.pdfName}`);
     window.print();
+  }
+
+  function deletePortfolio(itemId: string) {
+    setItems((current) => current.filter((item) => item.id !== itemId));
+    setViewingPortfolioId((current) => (current === itemId ? "" : current));
+    setEditingId((current) => (current === itemId ? null : current));
+    setNotice("Portofolio dihapus");
   }
 
   return (
@@ -1784,16 +2106,29 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
               className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
             >
               <Plus className="size-4" aria-hidden="true" />
-              {editingId ? "Simpan edit" : "Create"}
+              {editingId ? "Simpan edit" : "Simpan portofolio"}
             </button>
           </div>
         </div>
       </Panel>
 
       <Panel>
-        <PanelTitle icon={FileText} eyebrow="Portofolio" title="Karya siswa" />
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <PanelTitle icon={FileText} eyebrow="Portofolio" title="Karya siswa" />
+          <label className="relative lg:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+            <input
+              value={portfolioQuery}
+              onChange={(event) => setPortfolioQuery(event.target.value)}
+              aria-label="Mencari portofolio"
+              name="portfolioSearch"
+              className="field pl-9"
+              placeholder="Cari portofolio..."
+            />
+          </label>
+        </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {items.map((item) => (
+          {filteredPortfolios.map((item) => (
             <article key={item.id} className="rounded-lg border border-stone-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -1808,6 +2143,14 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
               </div>
               <p className="mt-3 text-sm leading-6 text-stone-600">{item.summary}</p>
               <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingPortfolioId(item.id)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                >
+                  <Eye className="size-3" aria-hidden="true" />
+                  Lihat
+                </button>
                 <button
                   type="button"
                   onClick={() => editPortfolio(item)}
@@ -1832,9 +2175,33 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
                   <Copy className="size-3" aria-hidden="true" />
                   Share link
                 </button>
+                <button
+                  type="button"
+                  onClick={() => deletePortfolio(item.id)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                >
+                  <Trash2 className="size-3" aria-hidden="true" />
+                  Hapus
+                </button>
               </div>
             </article>
           ))}
+        </div>
+        <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+            Detail tampil
+          </p>
+          {viewingPortfolio ? (
+            <div className="mt-3 space-y-2 text-sm">
+              <p className="font-semibold">{viewingPortfolio.title}</p>
+              <p className="text-stone-600">
+                {viewingPortfolio.student} | {viewingPortfolio.major} | {viewingPortfolio.year}
+              </p>
+              <p className="leading-6 text-stone-600">{viewingPortfolio.summary}</p>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-stone-500">Pilih portofolio untuk ditampilkan.</p>
+          )}
         </div>
       </Panel>
     </section>
@@ -1848,39 +2215,111 @@ function GalleryWorkspace({
   galleryLikes: Record<string, number>;
   likeGalleryItem: (title: string) => void;
 }) {
-  const [visibleItems, setVisibleItems] = useState(() =>
-    portfolioItems.map((item) => item.title),
+  const [items, setItems] = useState<GalleryItemState[]>(() =>
+    portfolioItems.map((item, index) => ({ id: `gallery-${index}`, ...item })),
   );
   const [dislikes, setDislikes] = useState<Record<string, number>>({});
-  const galleryItems = portfolioItems.filter((item) => visibleItems.includes(item.title));
+  const [galleryQuery, setGalleryQuery] = useState("");
+  const [editingGalleryId, setEditingGalleryId] = useState<string | null>(null);
+  const [galleryDraft, setGalleryDraft] = useState<GalleryItemState | null>(null);
+  const [viewingGalleryId, setViewingGalleryId] = useState(items[0]?.id ?? "");
+  const galleryItems = items.filter((item) =>
+    matchesSearch(galleryQuery, item.title, item.student, item.major, item.year, item.rating),
+  );
+  const viewingGallery = items.find((item) => item.id === viewingGalleryId);
 
   function dislikeGalleryItem(title: string) {
     setDislikes((current) => ({ ...current, [title]: (current[title] ?? 0) + 1 }));
   }
 
-  function deleteGalleryItem(title: string) {
-    setVisibleItems((current) => current.filter((itemTitle) => itemTitle !== title));
+  function startGalleryEdit(item: GalleryItemState) {
+    setEditingGalleryId(item.id);
+    setGalleryDraft({ ...item });
+  }
+
+  function updateGalleryDraft<K extends keyof GalleryItemState>(
+    key: K,
+    value: GalleryItemState[K],
+  ) {
+    setGalleryDraft((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  function saveGalleryItem() {
+    if (!galleryDraft || !editingGalleryId) {
+      return;
+    }
+
+    setItems((current) =>
+      current.map((item) => (item.id === editingGalleryId ? galleryDraft : item)),
+    );
+    setEditingGalleryId(null);
+    setGalleryDraft(null);
+  }
+
+  function deleteGalleryItem(itemId: string) {
+    setItems((current) => current.filter((item) => item.id !== itemId));
+    setViewingGalleryId((current) => (current === itemId ? "" : current));
+    setEditingGalleryId((current) => (current === itemId ? null : current));
   }
 
   return (
     <Panel>
-      <PanelTitle icon={GalleryVerticalEnd} eyebrow="Galeri Publik" title="Filter dan rating" />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <PanelTitle icon={GalleryVerticalEnd} eyebrow="Galeri Publik" title="Filter dan rating" />
+        <label className="relative lg:w-80">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+          <input
+            value={galleryQuery}
+            onChange={(event) => setGalleryQuery(event.target.value)}
+            aria-label="Mencari galeri"
+            name="gallerySearch"
+            className="field pl-9"
+            placeholder="Cari galeri..."
+          />
+        </label>
+      </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-        {galleryItems.map((item) => (
-          <article key={item.title} className="rounded-lg border border-stone-200 bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold">{item.title}</p>
-                <p className="mt-1 text-xs text-stone-500">
-                  {item.major} | {item.year}
-                </p>
+        {galleryItems.map((item) => {
+          const editing = editingGalleryId === item.id ? galleryDraft : null;
+
+          return (
+          <article key={item.id} className="rounded-lg border border-stone-200 bg-white p-4">
+            {editing ? (
+              <div className="grid gap-2">
+                <input value={editing.title} onChange={(event) => updateGalleryDraft("title", event.target.value)} className="field" />
+                <input value={editing.student} onChange={(event) => updateGalleryDraft("student", event.target.value)} className="field" />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input value={editing.major} onChange={(event) => updateGalleryDraft("major", event.target.value)} className="field" />
+                  <input value={editing.year} onChange={(event) => updateGalleryDraft("year", event.target.value)} className="field" />
+                </div>
+                <button type="button" onClick={saveGalleryItem} className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800">
+                  <Save className="size-3" aria-hidden="true" />
+                  Simpan
+                </button>
               </div>
-              <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">
-                <Star className="size-3" aria-hidden="true" />
-                {item.rating}
-              </span>
-            </div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">{item.title}</p>
+                    <p className="mt-1 text-xs text-stone-500">
+                      {item.major} | {item.year}
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">
+                    <Star className="size-3" aria-hidden="true" />
+                    {item.rating}
+                  </span>
+                </div>
             <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setViewingGalleryId(item.id)}
+                className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+              >
+                <Eye className="size-3" aria-hidden="true" />
+                Lihat
+              </button>
               <button
                 type="button"
                 onClick={() => likeGalleryItem(item.title)}
@@ -1899,15 +2338,38 @@ function GalleryWorkspace({
               </button>
               <button
                 type="button"
-                onClick={() => deleteGalleryItem(item.title)}
+                onClick={() => startGalleryEdit(item)}
+                className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+              >
+                <Edit3 className="size-3" aria-hidden="true" />
+                Edit / Simpan
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteGalleryItem(item.id)}
                 className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
               >
-                <X className="size-3" aria-hidden="true" />
+                <Trash2 className="size-3" aria-hidden="true" />
                 Hapus
               </button>
             </div>
+              </>
+            )}
           </article>
-        ))}
+          );
+        })}
+      </div>
+      <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+        <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+          Detail tampil
+        </p>
+        {viewingGallery ? (
+          <p className="mt-3 text-sm text-stone-600">
+            {viewingGallery.title} oleh {viewingGallery.student}, {viewingGallery.major} {viewingGallery.year}, rating {viewingGallery.rating}.
+          </p>
+        ) : (
+          <p className="mt-3 text-sm text-stone-500">Pilih galeri untuk ditampilkan.</p>
+        )}
       </div>
       {galleryItems.length === 0 && (
         <p className="mt-4 rounded-lg border border-stone-200 bg-white p-4 text-sm text-stone-500">
@@ -1923,12 +2385,57 @@ function SocialWorkspace({
   socialDraft,
   setSocialDraft,
   scheduleSocialPost,
+  updateScheduledPost,
+  deleteScheduledPost,
 }: {
   scheduledPosts: SocialPostState[];
   socialDraft: { platform: string; caption: string; scheduledAt: string };
   setSocialDraft: (draft: { platform: string; caption: string; scheduledAt: string }) => void;
   scheduleSocialPost: () => void;
+  updateScheduledPost: (originalKey: string, nextPost: SocialPostState) => void;
+  deleteScheduledPost: (postKey: string) => void;
 }) {
+  const [socialQuery, setSocialQuery] = useState("");
+  const [editingPostKey, setEditingPostKey] = useState<string | null>(null);
+  const [viewingPostKey, setViewingPostKey] = useState(
+    scheduledPosts[0] ? socialPostKey(scheduledPosts[0]) : "",
+  );
+  const filteredPosts = scheduledPosts.filter((post) =>
+    matchesSearch(socialQuery, post.platform, post.caption, post.time, post.engagement),
+  );
+  const viewingPost = scheduledPosts.find((post) => socialPostKey(post) === viewingPostKey);
+
+  function saveSocialPost() {
+    if (!editingPostKey) {
+      scheduleSocialPost();
+      return;
+    }
+
+    updateScheduledPost(editingPostKey, {
+      platform: socialDraft.platform,
+      caption: socialDraft.caption,
+      time: socialDraft.scheduledAt.replace("T", " "),
+      engagement: "Diedit",
+    });
+    setEditingPostKey(null);
+  }
+
+  function editSocialPost(post: SocialPostState) {
+    setEditingPostKey(socialPostKey(post));
+    setSocialDraft({
+      platform: post.platform,
+      caption: post.caption,
+      scheduledAt: post.time.includes(" ") ? post.time.replace(" ", "T") : socialDraft.scheduledAt,
+    });
+  }
+
+  function removeSocialPost(post: SocialPostState) {
+    const key = socialPostKey(post);
+    deleteScheduledPost(key);
+    setViewingPostKey((current) => (current === key ? "" : current));
+    setEditingPostKey((current) => (current === key ? null : current));
+  }
+
   return (
     <section className="grid gap-4 xl:grid-cols-[0.75fr_1fr]">
       <Panel>
@@ -1970,20 +2477,33 @@ function SocialWorkspace({
           </Field>
           <button
             type="button"
-            onClick={scheduleSocialPost}
+            onClick={saveSocialPost}
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
           >
-            <Send className="size-4" aria-hidden="true" />
-            Jadwalkan post
+            {editingPostKey ? <Save className="size-4" aria-hidden="true" /> : <Send className="size-4" aria-hidden="true" />}
+            {editingPostKey ? "Simpan post" : "Simpan jadwal"}
           </button>
         </div>
       </Panel>
 
       <Panel>
-        <PanelTitle icon={Activity} eyebrow="Queue" title="Post terjadwal" />
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <PanelTitle icon={Activity} eyebrow="Queue" title="Post terjadwal" />
+          <label className="relative lg:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+            <input
+              value={socialQuery}
+              onChange={(event) => setSocialQuery(event.target.value)}
+              aria-label="Mencari post sosmed"
+              name="socialSearch"
+              className="field pl-9"
+              placeholder="Cari post..."
+            />
+          </label>
+        </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {scheduledPosts.map((post) => (
-            <div key={`${post.platform}-${post.time}-${post.caption}`} className="rounded-lg border border-stone-200 bg-white p-3">
+          {filteredPosts.map((post) => (
+            <div key={socialPostKey(post)} className="rounded-lg border border-stone-200 bg-white p-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-semibold">{post.platform}</p>
                 <span className="rounded-md bg-cyan-100 px-2 py-1 text-xs font-bold text-cyan-900">
@@ -1992,8 +2512,32 @@ function SocialWorkspace({
               </div>
               <p className="mt-2 text-sm text-stone-600">{post.caption}</p>
               <p className="mt-2 text-xs font-semibold text-stone-500">{post.time}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setViewingPostKey(socialPostKey(post))} className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100">
+                  <Eye className="size-3" aria-hidden="true" />
+                  Lihat
+                </button>
+                <button type="button" onClick={() => editSocialPost(post)} className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100">
+                  <Edit3 className="size-3" aria-hidden="true" />
+                  Edit
+                </button>
+                <button type="button" onClick={() => removeSocialPost(post)} className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
+                  <Trash2 className="size-3" aria-hidden="true" />
+                  Hapus
+                </button>
+              </div>
             </div>
           ))}
+        </div>
+        <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">Detail tampil</p>
+          {viewingPost ? (
+            <p className="mt-3 text-sm text-stone-600">
+              {viewingPost.platform} pada {viewingPost.time}: {viewingPost.caption} ({viewingPost.engagement}).
+            </p>
+          ) : (
+            <p className="mt-3 text-sm text-stone-500">Pilih post untuk ditampilkan.</p>
+          )}
         </div>
       </Panel>
     </section>
@@ -2052,6 +2596,19 @@ function LearningWorkspace({
   });
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  const [learningQuery, setLearningQuery] = useState("");
+  const [viewingLearningId, setViewingLearningId] = useState(modules[0]?.id ?? "");
+  const filteredModules = modules.filter((module) =>
+    matchesSearch(
+      learningQuery,
+      module.title,
+      module.type,
+      module.description,
+      module.corrected,
+      module.score,
+    ),
+  );
+  const viewingLearning = modules.find((module) => module.id === viewingLearningId);
 
   function updateMaterialDraft<K extends keyof LearningState>(
     key: K,
@@ -2184,6 +2741,18 @@ function LearningWorkspace({
     return `data:text/plain;charset=utf-8,${encodeURIComponent(body)}`;
   }
 
+  function deleteLearningItem(moduleId: string) {
+    if (!canEditLearning) {
+      return;
+    }
+
+    setModules((current) => current.filter((module) => module.id !== moduleId));
+    setViewingLearningId((current) => (current === moduleId ? "" : current));
+    setEditingMaterialId((current) => (current === moduleId ? null : current));
+    setEditingQuestionId((current) => (current === moduleId ? null : current));
+    setNotice("Materi/soal dihapus");
+  }
+
   return (
     <section className="grid gap-4 xl:grid-cols-[0.88fr_1.12fr]">
       <div className="grid gap-4">
@@ -2225,7 +2794,7 @@ function LearningWorkspace({
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
             >
               <Plus className="size-4" aria-hidden="true" />
-              {editingMaterialId ? "Simpan materi" : "Create materi"}
+              {editingMaterialId ? "Simpan materi" : "Simpan materi"}
             </button>
           </div>
         </Panel>
@@ -2288,7 +2857,7 @@ function LearningWorkspace({
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
               >
                 <Plus className="size-4" aria-hidden="true" />
-                {editingQuestionId ? "Simpan soal" : "Create soal"}
+                {editingQuestionId ? "Simpan soal" : "Simpan soal"}
               </button>
             </div>
             {!canEditLearning && (
@@ -2301,9 +2870,22 @@ function LearningWorkspace({
       </div>
 
       <Panel>
-        <PanelTitle icon={BookOpenCheck} eyebrow="E-Learning" title="Materi dan soal aktif" />
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <PanelTitle icon={BookOpenCheck} eyebrow="E-Learning" title="Materi dan soal aktif" />
+          <label className="relative lg:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+            <input
+              value={learningQuery}
+              onChange={(event) => setLearningQuery(event.target.value)}
+              aria-label="Mencari materi atau soal"
+              name="learningSearch"
+              className="field pl-9"
+              placeholder="Cari materi atau soal..."
+            />
+          </label>
+        </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {modules.map((module) => (
+          {filteredModules.map((module) => (
             <div key={module.id} className="rounded-lg border border-stone-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -2332,6 +2914,14 @@ function LearningWorkspace({
                 {module.corrected}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingLearningId(module.id)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                >
+                  <Eye className="size-3" aria-hidden="true" />
+                  Lihat
+                </button>
                 {module.type === "Materi" ? (
                   <a
                     href={materialDownloadHref(module)}
@@ -2381,9 +2971,33 @@ function LearningWorkspace({
                   <Edit3 className="size-3" aria-hidden="true" />
                   Edit
                 </button>
+                <button
+                  type="button"
+                  onClick={() => deleteLearningItem(module.id)}
+                  disabled={!canEditLearning}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Trash2 className="size-3" aria-hidden="true" />
+                  Hapus
+                </button>
               </div>
             </div>
           ))}
+        </div>
+        <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+            Detail tampil
+          </p>
+          {viewingLearning ? (
+            <div className="mt-3 space-y-2 text-sm">
+              <p className="font-semibold">{viewingLearning.title}</p>
+              <p className="text-stone-600">{viewingLearning.type} | {viewingLearning.description}</p>
+              <p className="text-stone-600">Progress {viewingLearning.progress}% | Score {viewingLearning.score}</p>
+              <p className="text-stone-600">{viewingLearning.corrected}</p>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-stone-500">Pilih materi atau soal untuk ditampilkan.</p>
+          )}
         </div>
       </Panel>
     </section>
@@ -2392,8 +3006,12 @@ function LearningWorkspace({
 
 function AnalyticsWorkspace() {
   const [sheetUrl, setSheetUrl] = useState("https://docs.google.com/spreadsheets/create");
+  const [sheetStatus, setSheetStatus] = useState("Link Sheet belum disimpan.");
+  const [analyticsQuery, setAnalyticsQuery] = useState("");
+  const [editingProjectName, setEditingProjectName] = useState<string | null>(null);
+  const [projectDraft, setProjectDraft] = useState<AnalyticsProjectState | null>(null);
   const weeklyProgress = [42, 58, 71, 86];
-  const projectHealth = [
+  const [projectRows, setProjectRows] = useState<AnalyticsProjectState[]>([
     {
       project: "Kanopi baja ringan B-21",
       owner: "Guru QC",
@@ -2415,13 +3033,49 @@ function AnalyticsWorkspace() {
       issue: "Order baru",
       status: "Menunggu approve",
     },
-  ];
+  ]);
+  const [viewingProjectName, setViewingProjectName] = useState(projectRows[0]?.project ?? "");
+  const filteredProjectRows = projectRows.filter((row) =>
+    matchesSearch(analyticsQuery, row.project, row.owner, row.progress, row.issue, row.status),
+  );
+  const viewingProject = projectRows.find((row) => row.project === viewingProjectName);
+
+  function updateProjectDraft<K extends keyof AnalyticsProjectState>(
+    key: K,
+    value: AnalyticsProjectState[K],
+  ) {
+    setProjectDraft((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  function editAnalyticsProject(row: AnalyticsProjectState) {
+    setEditingProjectName(row.project);
+    setProjectDraft({ ...row });
+  }
+
+  function saveAnalyticsProject() {
+    if (!projectDraft || !editingProjectName) {
+      return;
+    }
+
+    setProjectRows((rows) =>
+      rows.map((row) => (row.project === editingProjectName ? projectDraft : row)),
+    );
+    setViewingProjectName(projectDraft.project);
+    setEditingProjectName(null);
+    setProjectDraft(null);
+  }
+
+  function deleteAnalyticsProject(project: string) {
+    setProjectRows((rows) => rows.filter((row) => row.project !== project));
+    setViewingProjectName((current) => (current === project ? "" : current));
+    setEditingProjectName((current) => (current === project ? null : current));
+  }
 
   function exportAnalyticsCsv() {
     downloadCsvFile("welddesign-google-spreadsheet.csv", [
       ["Sheet", "Nama", "Nilai", "Catatan"],
       ...analyticsRows.map((row) => ["Analytics", row.label, row.value, row.trend]),
-      ...projectHealth.map((row) => [
+      ...projectRows.map((row) => [
         "Projects",
         row.project,
         row.progress,
@@ -2445,7 +3099,15 @@ function AnalyticsWorkspace() {
                 placeholder="https://docs.google.com/spreadsheets/..."
               />
             </Field>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => setSheetStatus("Link Google Spreadsheet tersimpan.")}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
+              >
+                <Save className="size-4" aria-hidden="true" />
+                Simpan link
+              </button>
               <a
                 href={sheetUrl.trim() || "https://docs.google.com/spreadsheets/create"}
                 target="_blank"
@@ -2458,12 +3120,13 @@ function AnalyticsWorkspace() {
               <button
                 type="button"
                 onClick={exportAnalyticsCsv}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-semibold hover:bg-stone-100"
               >
                 <Download className="size-4" aria-hidden="true" />
                 Export CSV
               </button>
             </div>
+            <p className="text-xs font-semibold text-stone-500">{sheetStatus}</p>
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
             <MiniStatus label="Data source" value="Google Sheet" />
@@ -2514,28 +3177,84 @@ function AnalyticsWorkspace() {
         </Panel>
 
         <Panel>
-          <PanelTitle icon={Activity} eyebrow="Operasional" title="Tabel kesehatan proyek" />
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <PanelTitle icon={Activity} eyebrow="Operasional" title="Tabel kesehatan proyek" />
+            <label className="relative lg:w-80">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+              <input
+                value={analyticsQuery}
+                onChange={(event) => setAnalyticsQuery(event.target.value)}
+                aria-label="Mencari data analytics"
+                name="analyticsSearch"
+                className="field pl-9"
+                placeholder="Cari data analytics..."
+              />
+            </label>
+          </div>
           <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
-            <div className="grid grid-cols-[1.2fr_0.7fr_0.5fr_1fr] gap-3 bg-stone-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+            <div className="grid grid-cols-[1.2fr_0.7fr_0.5fr_1fr_160px] gap-3 bg-stone-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
               <span>Project</span>
               <span>Owner</span>
               <span>Progress</span>
               <span>Status</span>
+              <span>Aksi</span>
             </div>
-            {projectHealth.map((row) => (
+            {filteredProjectRows.map((row) => {
+              const editing = editingProjectName === row.project ? projectDraft : null;
+
+              return (
               <div
                 key={row.project}
-                className="grid grid-cols-[1.2fr_0.7fr_0.5fr_1fr] gap-3 border-t border-stone-100 px-3 py-3 text-sm"
+                className="grid grid-cols-[1.2fr_0.7fr_0.5fr_1fr_160px] gap-3 border-t border-stone-100 px-3 py-3 text-sm"
               >
-                <div>
-                  <p className="font-semibold">{row.project}</p>
-                  <p className="mt-1 text-xs text-red-700">{row.issue}</p>
-                </div>
-                <span className="text-stone-600">{row.owner}</span>
-                <span className="font-semibold">{row.progress}</span>
-                <span className="text-stone-600">{row.status}</span>
+                {editing ? (
+                  <>
+                    <input value={editing.project} onChange={(event) => updateProjectDraft("project", event.target.value)} className="field" />
+                    <input value={editing.owner} onChange={(event) => updateProjectDraft("owner", event.target.value)} className="field" />
+                    <input value={editing.progress} onChange={(event) => updateProjectDraft("progress", event.target.value)} className="field" />
+                    <input value={editing.status} onChange={(event) => updateProjectDraft("status", event.target.value)} className="field" />
+                    <button type="button" onClick={saveAnalyticsProject} className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800">
+                      <Save className="size-3" aria-hidden="true" />
+                      Simpan
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <p className="font-semibold">{row.project}</p>
+                      <p className="mt-1 text-xs text-red-700">{row.issue}</p>
+                    </div>
+                    <span className="text-stone-600">{row.owner}</span>
+                    <span className="font-semibold">{row.progress}</span>
+                    <span className="text-stone-600">{row.status}</span>
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" onClick={() => setViewingProjectName(row.project)} className="rounded-md border border-stone-200 px-2 py-1 text-xs font-semibold hover:bg-stone-100">
+                        Lihat
+                      </button>
+                      <button type="button" onClick={() => editAnalyticsProject(row)} className="rounded-md border border-stone-200 px-2 py-1 text-xs font-semibold hover:bg-stone-100">
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => deleteAnalyticsProject(row.project)} className="rounded-md border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50">
+                        Hapus
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
-            ))}
+              );
+            })}
+          </div>
+          <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+              Detail tampil
+            </p>
+            {viewingProject ? (
+              <p className="mt-3 text-sm text-stone-600">
+                {viewingProject.project} dikelola {viewingProject.owner}, progress {viewingProject.progress}, status {viewingProject.status}. Masalah: {viewingProject.issue}.
+              </p>
+            ) : (
+              <p className="mt-3 text-sm text-stone-500">Pilih baris analytics untuk ditampilkan.</p>
+            )}
           </div>
         </Panel>
       </section>
@@ -2574,6 +3293,12 @@ function ClientWorkspace({
     issue: "Butuh estimasi dan jadwal survey.",
   });
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [orderQuery, setOrderQuery] = useState("");
+  const [viewingOrderId, setViewingOrderId] = useState(orders[0]?.id ?? "");
+  const filteredOrders = orders.filter((order) =>
+    matchesSearch(orderQuery, order.title, order.client, order.issue, order.status, order.progress),
+  );
+  const viewingOrder = orders.find((order) => order.id === viewingOrderId);
 
   function createOrder() {
     const existingOrder = editingOrderId
@@ -2685,6 +3410,17 @@ function ClientWorkspace({
     setNotice("Client menerima dan menyetujui barang aman");
   }
 
+  function deleteOrder(order: ClientOrderState) {
+    if (!canManageClientOrder && order.progress > 0) {
+      return;
+    }
+
+    setOrders((current) => current.filter((item) => item.id !== order.id));
+    setViewingOrderId((current) => (current === order.id ? "" : current));
+    setEditingOrderId((current) => (current === order.id ? null : current));
+    setNotice("Order dihapus");
+  }
+
   return (
     <section className="grid gap-4 xl:grid-cols-[0.74fr_1.26fr]">
       <Panel>
@@ -2728,7 +3464,7 @@ function ClientWorkspace({
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
           >
             <Plus className="size-4" aria-hidden="true" />
-            {editingOrderId ? "Simpan order" : "Create order"}
+            {editingOrderId ? "Simpan order" : "Simpan order"}
           </button>
         </div>
 
@@ -2756,9 +3492,22 @@ function ClientWorkspace({
       </Panel>
 
       <Panel>
-        <PanelTitle icon={Activity} eyebrow="Order" title="Progress, masalah, approval" />
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <PanelTitle icon={Activity} eyebrow="Order" title="Progress, masalah, approval" />
+          <label className="relative lg:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+            <input
+              value={orderQuery}
+              onChange={(event) => setOrderQuery(event.target.value)}
+              aria-label="Mencari order client"
+              name="clientOrderSearch"
+              className="field pl-9"
+              placeholder="Cari order..."
+            />
+          </label>
+        </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {orders.map((order) => (
+          {filteredOrders.map((order) => (
             <article key={order.id} className="rounded-lg border border-stone-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -2816,6 +3565,14 @@ function ClientWorkspace({
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
+                  onClick={() => setViewingOrderId(order.id)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                >
+                  <Eye className="size-3" aria-hidden="true" />
+                  Lihat
+                </button>
+                <button
+                  type="button"
                   onClick={() => editOrder(order)}
                   disabled={!canManageClientOrder}
                   className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
@@ -2849,9 +3606,33 @@ function ClientWorkspace({
                     Terima barang aman
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => deleteOrder(order)}
+                  disabled={!canManageClientOrder && order.progress > 0}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Trash2 className="size-3" aria-hidden="true" />
+                  Hapus
+                </button>
               </div>
             </article>
           ))}
+        </div>
+        <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
+            Detail tampil
+          </p>
+          {viewingOrder ? (
+            <div className="mt-3 space-y-2 text-sm">
+              <p className="font-semibold">{viewingOrder.title}</p>
+              <p className="text-stone-600">{viewingOrder.client} | {viewingOrder.status}</p>
+              <p className="text-stone-600">Progress {viewingOrder.progress}%</p>
+              <p className="text-stone-600">Masalah: {viewingOrder.issue}</p>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-stone-500">Pilih order untuk ditampilkan.</p>
+          )}
         </div>
 
         <div className="mt-4 rounded-lg border border-stone-200 bg-white p-3">
@@ -2879,6 +3660,19 @@ function ClientWorkspace({
 
 function currentClientLabel(role: Role) {
   return role === "CLIENT" ? "Client baru" : `${roleLabels[role]} internal`;
+}
+
+function matchesSearch(query: string, ...values: Array<string | number | undefined>) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return true;
+  }
+
+  return values.some((value) => String(value ?? "").toLowerCase().includes(needle));
+}
+
+function socialPostKey(post: SocialPostState) {
+  return `${post.platform}-${post.time}-${post.caption}`;
 }
 
 function downloadCsvFile(fileName: string, rows: string[][]) {
