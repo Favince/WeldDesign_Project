@@ -1,32 +1,5 @@
 import { calculateWeldEstimate, type EstimateInput } from "@/lib/estimator";
 
-export const dashboardStats = [
-  {
-    label: "Project aktif",
-    value: "18",
-    delta: "+4 minggu ini",
-    tone: "border-emerald-300 bg-emerald-50 text-emerald-900",
-  },
-  {
-    label: "Estimasi bulan ini",
-    value: "Rp 184,6 jt",
-    delta: "42 dokumen",
-    tone: "border-amber-300 bg-amber-50 text-amber-950",
-  },
-  {
-    label: "Stok kritis",
-    value: "7",
-    delta: "Elektroda dan gas",
-    tone: "border-red-300 bg-red-50 text-red-950",
-  },
-  {
-    label: "Order client",
-    value: "14",
-    delta: "6 menunggu approval",
-    tone: "border-cyan-300 bg-cyan-50 text-cyan-950",
-  },
-] as const;
-
 export const featureModules = [
   {
     id: "security",

@@ -74,7 +74,6 @@ import {
 import {
   auditTrail,
   chatThreads,
-  dashboardStats,
   inventoryItems,
   learningModules,
   maintenanceEvents,
@@ -111,7 +110,7 @@ const navigation: NavItem[] = [
     label: "Dashboard",
     icon: LayoutDashboard,
     permission: "dashboard:read",
-    summary: "Ringkasan produksi, deadline, dan modul prioritas.",
+    summary: "Akses modul kerja dan antrian operasional.",
   },
   {
     id: "security",
@@ -1165,18 +1164,6 @@ function OverviewWorkspace({
 
   return (
     <div className="grid gap-4">
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {dashboardStats.map((stat) => (
-          <div key={stat.label} className={`rounded-lg border p-4 ${stat.tone}`}>
-            <p className="text-sm font-medium opacity-80">{stat.label}</p>
-            <div className="mt-3 flex items-end justify-between gap-4">
-              <p className="text-3xl font-semibold">{stat.value}</p>
-              <p className="text-xs font-semibold">{stat.delta}</p>
-            </div>
-          </div>
-        ))}
-      </section>
-
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel>
           <PanelTitle
