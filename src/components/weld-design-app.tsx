@@ -40,7 +40,16 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState, type ChangeEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import { LoginPage } from "@/components/auth/login-page";
 import { type AppUser } from "@/lib/auth-demo";
 import {
@@ -231,6 +240,47 @@ type ApiState =
   | { state: "done"; message: string; result?: EstimateResult }
   | { state: "error"; message: string };
 
+function usePersistentState<T>(
+  key: string,
+  initialValue: T | (() => T),
+): [T, Dispatch<SetStateAction<T>>] {
+  const [state, setState] = useState<T>(() => {
+    return typeof initialValue === "function" ? (initialValue as () => T)() : initialValue;
+  });
+  const hasLoadedRef = useRef(false);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      try {
+        const savedValue = window.localStorage.getItem(key);
+        if (savedValue) {
+          setState(JSON.parse(savedValue) as T);
+        }
+      } catch {
+        window.localStorage.removeItem(key);
+      } finally {
+        hasLoadedRef.current = true;
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [key]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (!hasLoadedRef.current) {
+      return;
+    }
+
+    window.localStorage.setItem(key, JSON.stringify(state));
+  }, [key, state]);
+
+  return [state, setState];
+}
+
 type ProjectStageState = {
   name: string;
   owner: string;
@@ -321,32 +371,50 @@ type AnalyticsProjectState = {
 };
 
 export function WeldDesignApp() {
-  const [activeSection, setActiveSection] = useState<SectionId>("overview");
-  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
-  const [authState, setAuthState] = useState<ApiState>({
+  const [activeSection, setActiveSection] = usePersistentState<SectionId>(
+    "welddesign.activeSection",
+    "overview",
+  );
+  const [isWorkspaceOpen, setIsWorkspaceOpen] = usePersistentState(
+    "welddesign.workspaceOpen",
+    false,
+  );
+  const [currentUser, setCurrentUser] = usePersistentState<AppUser | null>(
+    "welddesign.currentUser",
+    null,
+  );
+  const [authState, setAuthState] = usePersistentState<ApiState>("welddesign.authState", {
     state: "idle",
     message: "Belum login. Role otomatis: Client.",
   });
   const [notice, setNotice] = useState("Mode Client");
 
-  const [estimateInput, setEstimateInput] = useState<EstimateInput>(initialEstimate);
+  const [estimateInput, setEstimateInput] = usePersistentState<EstimateInput>(
+    "welddesign.estimateInput",
+    initialEstimate,
+  );
   const [estimateState, setEstimateState] = useState<ApiState>({
     state: "idle",
     message: "Draft lokal belum dikirim ke API.",
   });
 
-  const [projectStageList, setProjectStageList] = useState<ProjectStageState[]>(() =>
+  const [projectStageList, setProjectStageList] = usePersistentState<ProjectStageState[]>(
+    "welddesign.projectStages",
+    () =>
     projectStages.map((stage) => ({ ...stage })),
   );
-  const [inventoryList, setInventoryList] = useState<InventoryState[]>(() =>
+  const [inventoryList, setInventoryList] = usePersistentState<InventoryState[]>(
+    "welddesign.inventory",
+    () =>
     inventoryItems.map((item) => ({ ...item })),
   );
 
-  const [scheduledPosts, setScheduledPosts] = useState<SocialPostState[]>(() =>
+  const [scheduledPosts, setScheduledPosts] = usePersistentState<SocialPostState[]>(
+    "welddesign.scheduledPosts",
+    () =>
     socialPosts.map((post) => ({ ...post })),
   );
-  const [socialDraft, setSocialDraft] = useState({
+  const [socialDraft, setSocialDraft] = usePersistentState("welddesign.socialDraft", {
     platform: "Instagram",
     caption: "Progress proyek welding siswa Aerovin",
     scheduledAt: "2026-05-18T07:30",
@@ -1162,7 +1230,9 @@ function EstimatorWorkspace({
   updateEstimate: <K extends keyof EstimateInput>(key: K, value: EstimateInput[K]) => void;
   syncEstimate: () => void;
 }) {
-  const [estimateRecords, setEstimateRecords] = useState<EstimateRecordState[]>(() =>
+  const [estimateRecords, setEstimateRecords] = usePersistentState<EstimateRecordState[]>(
+    "welddesign.estimateRecords",
+    () =>
     sampleEstimates.map((sample, index) => ({
       id: `estimate-${index}`,
       project: sample.project,
@@ -1964,7 +2034,9 @@ function InventoryWorkspace({
 }
 
 function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void }) {
-  const [items, setItems] = useState<PortfolioState[]>(() =>
+  const [items, setItems] = usePersistentState<PortfolioState[]>(
+    "welddesign.portfolios",
+    () =>
     portfolioItems.map((item, index) => ({
       id: `portfolio-${index}`,
       title: item.title,
@@ -1976,7 +2048,7 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
       pdfName: `${item.student.toLowerCase().replace(/\s+/g, "-")}-portfolio.pdf`,
     })),
   );
-  const [draft, setDraft] = useState<PortfolioState>({
+  const [draft, setDraft] = usePersistentState<PortfolioState>("welddesign.portfolioDraft", {
     id: "draft",
     title: "Railing tangga minimalis",
     student: "Nama Siswa",
@@ -2220,8 +2292,10 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
 }
 
 function AutomationWorkspace({ setNotice }: { setNotice: (notice: string) => void }) {
-  const [automations, setAutomations] = useState<AutomationState[]>([
-    {
+  const [automations, setAutomations] = usePersistentState<AutomationState[]>(
+    "welddesign.automations",
+    [
+      {
       id: "automation-1",
       name: "WeldDesign Spreadsheet Builder",
       spreadsheetName: "WeldDesign Production Data",
@@ -2231,8 +2305,12 @@ function AutomationWorkspace({ setNotice }: { setNotice: (notice: string) => voi
       createdAt: "Default",
       lastRun: "-",
     },
-  ]);
-  const [draft, setDraft] = useState<AutomationState>(automations[0]);
+    ],
+  );
+  const [draft, setDraft] = usePersistentState<AutomationState>(
+    "welddesign.automationDraft",
+    automations[0],
+  );
   const [automationQuery, setAutomationQuery] = useState("");
   const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null);
   const [viewingAutomationId, setViewingAutomationId] = useState(automations[0]?.id ?? "");
@@ -2686,7 +2764,9 @@ function LearningWorkspace({
   const canEditLearning = selectedRole === "GURU";
   const googleFormsCreateUrl = "https://docs.google.com/forms/create";
   const googleSheetsCreateUrl = "https://docs.google.com/spreadsheets/create";
-  const [modules, setModules] = useState<LearningState[]>(() =>
+  const [modules, setModules] = usePersistentState<LearningState[]>(
+    "welddesign.learningModules",
+    () =>
     learningModules.map((module, index) => ({
       id: `learning-${index}`,
       title: module.title,
@@ -2703,7 +2783,9 @@ function LearningWorkspace({
     })),
   );
 
-  const [materialDraft, setMaterialDraft] = useState<LearningState>({
+  const [materialDraft, setMaterialDraft] = usePersistentState<LearningState>(
+    "welddesign.materialDraft",
+    {
     id: "material-draft",
     title: "Materi inspeksi visual sambungan las",
     type: "Materi",
@@ -2714,8 +2796,11 @@ function LearningWorkspace({
     materialFileName: "materi-inspeksi-visual.txt",
     materialBody:
       "Materi inspeksi visual: cek undercut, porosity, overlap, spatter, dan dokumentasi before-after.",
-  });
-  const [questionDraft, setQuestionDraft] = useState<LearningState>({
+    },
+  );
+  const [questionDraft, setQuestionDraft] = usePersistentState<LearningState>(
+    "welddesign.questionDraft",
+    {
     id: "question-draft",
     title: "Soal QC Visual",
     type: "Soal",
@@ -2725,7 +2810,8 @@ function LearningWorkspace({
     corrected: "Draft soal",
     formUrl: googleFormsCreateUrl,
     sheetUrl: googleSheetsCreateUrl,
-  });
+    },
+  );
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [learningQuery, setLearningQuery] = useState("");
@@ -3137,14 +3223,22 @@ function LearningWorkspace({
 }
 
 function AnalyticsWorkspace() {
-  const [sheetUrl, setSheetUrl] = useState("https://docs.google.com/spreadsheets/create");
-  const [sheetStatus, setSheetStatus] = useState("Link Sheet belum disimpan.");
+  const [sheetUrl, setSheetUrl] = usePersistentState(
+    "welddesign.analyticsSheetUrl",
+    "https://docs.google.com/spreadsheets/create",
+  );
+  const [sheetStatus, setSheetStatus] = usePersistentState(
+    "welddesign.analyticsSheetStatus",
+    "Link Sheet belum disimpan.",
+  );
   const [analyticsQuery, setAnalyticsQuery] = useState("");
   const [editingProjectName, setEditingProjectName] = useState<string | null>(null);
   const [projectDraft, setProjectDraft] = useState<AnalyticsProjectState | null>(null);
   const weeklyProgress = [42, 58, 71, 86];
-  const [projectRows, setProjectRows] = useState<AnalyticsProjectState[]>([
-    {
+  const [projectRows, setProjectRows] = usePersistentState<AnalyticsProjectState[]>(
+    "welddesign.analyticsProjectRows",
+    [
+      {
       project: "Kanopi baja ringan B-21",
       owner: "Guru QC",
       progress: "78%",
@@ -3165,7 +3259,8 @@ function AnalyticsWorkspace() {
       issue: "Order baru",
       status: "Menunggu approve",
     },
-  ]);
+    ],
+  );
   const [viewingProjectName, setViewingProjectName] = useState(projectRows[0]?.project ?? "");
   const filteredProjectRows = projectRows.filter((row) =>
     matchesSearch(analyticsQuery, row.project, row.owner, row.progress, row.issue, row.status),
@@ -3407,8 +3502,10 @@ function ClientWorkspace({
 }) {
   const canApprove = canAccess(selectedRole, "project:approve");
   const canManageClientOrder = selectedRole !== "CLIENT";
-  const [orders, setOrders] = useState<ClientOrderState[]>([
-    {
+  const [orders, setOrders] = usePersistentState<ClientOrderState[]>(
+    "welddesign.clientOrders",
+    [
+      {
       id: "order-1",
       title: "Kanopi baja ringan B-21",
       client: "Client Portal",
@@ -3418,8 +3515,9 @@ function ClientWorkspace({
       approved: false,
       accepted: false,
     },
-  ]);
-  const [draftOrder, setDraftOrder] = useState({
+    ],
+  );
+  const [draftOrder, setDraftOrder] = usePersistentState("welddesign.clientOrderDraft", {
     title: "Pagar workshop sekolah",
     client: currentClientLabel(selectedRole),
     issue: "Butuh estimasi dan jadwal survey.",
