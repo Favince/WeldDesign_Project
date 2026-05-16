@@ -15,6 +15,7 @@ import {
   Copy,
   DatabaseBackup,
   Download,
+  Edit3,
   FileSpreadsheet,
   FileText,
   GalleryVerticalEnd,
@@ -22,6 +23,8 @@ import {
   HardHat,
   LayoutDashboard,
   LockKeyhole,
+  LogIn,
+  LogOut,
   MapPin,
   Megaphone,
   MessageSquareText,
@@ -37,14 +40,16 @@ import {
   Smartphone,
   Sparkles,
   Star,
+  Save,
   ThumbsUp,
   Upload,
   UserRound,
   WandSparkles,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import Image from "next/image";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   calculateWeldEstimate,
   formatRupiah,
@@ -102,6 +107,31 @@ type NavItem = {
   permission: Permission;
   summary: string;
 };
+
+type AppUser = {
+  name: string;
+  email: string;
+  role: Role;
+  token?: string;
+};
+
+const demoUsers: AppUser[] = [
+  {
+    name: "Pak Guru QC",
+    email: "guru@krisavaaerovin.my.id",
+    role: "GURU",
+  },
+  {
+    name: "Admin Aerovin",
+    email: "admin@krisavaaerovin.my.id",
+    role: "ADMIN",
+  },
+  {
+    name: "Raka Siswa",
+    email: "siswa@krisavaaerovin.my.id",
+    role: "SISWA",
+  },
+];
 
 const navigation: NavItem[] = [
   {
@@ -178,7 +208,7 @@ const navigation: NavItem[] = [
     id: "learning",
     label: "E-Learning",
     icon: BookOpenCheck,
-    permission: "project:update",
+    permission: "learning:access",
     summary: "Materi las, DKV, quiz, dan progress pembelajaran.",
   },
   {
@@ -263,8 +293,12 @@ type GeneratedAsset = {
 
 export function WeldDesignApp() {
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
-  const [selectedRole, setSelectedRole] = useState<Role>("GURU");
-  const [notice, setNotice] = useState("Ready");
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+  const [authState, setAuthState] = useState<ApiState>({
+    state: "idle",
+    message: "Belum login. Role otomatis: Client.",
+  });
+  const [notice, setNotice] = useState("Mode Client");
 
   const [estimateInput, setEstimateInput] = useState<EstimateInput>(initialEstimate);
   const [estimateState, setEstimateState] = useState<ApiState>({
@@ -317,6 +351,7 @@ export function WeldDesignApp() {
     Object.fromEntries(portfolioItems.map((item) => [item.title, Math.round(item.rating * 10)])),
   );
 
+  const selectedRole: Role = currentUser?.role ?? "CLIENT";
   const estimate = useMemo(() => calculateWeldEstimate(estimateInput), [estimateInput]);
   const activeNav = navigation.find((item) => item.id === activeSection) ?? navigation[0];
   const accessibleModules = navigation.filter((item) =>
@@ -324,8 +359,58 @@ export function WeldDesignApp() {
   ).length;
 
   function openSection(section: SectionId) {
+    const navItem = navigation.find((item) => item.id === section);
     setActiveSection(section);
-    setNotice(`${navigation.find((item) => item.id === section)?.label ?? "Modul"} dibuka`);
+
+    if (navItem && !canAccess(selectedRole, navItem.permission)) {
+      setNotice(`Akses ${navItem.label} ditolak untuk ${roleLabels[selectedRole]}`);
+      return;
+    }
+
+    setNotice(`${navItem?.label ?? "Modul"} dibuka`);
+  }
+
+  async function loginAs(user: AppUser, password = "password-demo-123") {
+    setAuthState({ state: "loading", message: `Login sebagai ${roleLabels[user.role]}...` });
+
+    try {
+      const response = await fetch("/api/auth/demo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: user.email,
+          password,
+          role: user.role,
+        }),
+      });
+      const payload = (await response.json()) as
+        | { session: { token: string } }
+        | { error: string };
+
+      if (!response.ok || !("session" in payload)) {
+        throw new Error("error" in payload ? payload.error : "Login gagal");
+      }
+
+      setCurrentUser({ ...user, token: payload.session.token });
+      setAuthState({
+        state: "done",
+        message: `Login aktif: ${user.name} (${roleLabels[user.role]}).`,
+      });
+      setNotice(`Login sebagai ${roleLabels[user.role]}`);
+      setActiveSection("overview");
+    } catch (error) {
+      setAuthState({
+        state: "error",
+        message: error instanceof Error ? error.message : "Login gagal",
+      });
+    }
+  }
+
+  function logout() {
+    setCurrentUser(null);
+    setAuthState({ state: "idle", message: "Logout. Role otomatis kembali ke Client." });
+    setNotice("Mode Client");
+    setActiveSection("client");
   }
 
   function updateEstimate<K extends keyof EstimateInput>(key: K, value: EstimateInput[K]) {
@@ -422,6 +507,15 @@ export function WeldDesignApp() {
     setNotice(`Laporan kerusakan dibuat untuk ${code}`);
   }
 
+  function updateInventoryItem(code: string, nextItem: InventoryState) {
+    setInventoryList((items) =>
+      items.map((item) =>
+        item.code === code ? { ...nextItem, code: nextItem.code.trim() || code } : item,
+      ),
+    );
+    setNotice(`Inventaris ${nextItem.code.trim() || code} berhasil diupdate`);
+  }
+
   function addInventoryDemoItem() {
     const nextIndex = inventoryList.length + 1;
     setInventoryList((items) => [
@@ -491,8 +585,8 @@ export function WeldDesignApp() {
 
   return (
     <main className="min-h-screen bg-[#f5f2eb] text-stone-950">
-      <div className="mx-auto grid min-h-screen w-full max-w-[1500px] gap-4 p-3 lg:grid-cols-[272px_1fr] lg:p-5">
-        <aside className="border-line bg-panel flex flex-col gap-4 rounded-lg border p-3 shadow-sm lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)]">
+      <div className="grid min-h-screen w-full gap-4 p-3 lg:grid-cols-[280px_minmax(0,1fr)] lg:p-4">
+        <aside className="border-line bg-panel flex flex-col gap-4 rounded-lg border p-3 shadow-sm lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]">
           <div className="flex items-center gap-3 px-1">
             <div className="flex size-10 items-center justify-center rounded-lg bg-stone-950 text-amber-300">
               <HardHat className="size-5" aria-hidden="true" />
@@ -505,30 +599,13 @@ export function WeldDesignApp() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-stone-200 bg-white p-2">
-            <p className="px-1 text-xs font-bold uppercase tracking-[0.14em] text-stone-500">
-              Role aktif
-            </p>
-            <div className="mt-2 grid grid-cols-2 gap-1">
-              {roles.map((role) => (
-                <button
-                  key={role}
-                  type="button"
-                  onClick={() => {
-                    setSelectedRole(role);
-                    setNotice(`Role diganti ke ${roleLabels[role]}`);
-                  }}
-                  className={`rounded-md px-2 py-2 text-xs font-semibold transition ${
-                    selectedRole === role
-                      ? "bg-stone-950 text-white"
-                      : "text-stone-600 hover:bg-stone-100"
-                  }`}
-                >
-                  {roleLabels[role]}
-                </button>
-              ))}
-            </div>
-          </div>
+          <AuthPanel
+            currentUser={currentUser}
+            selectedRole={selectedRole}
+            authState={authState}
+            loginAs={loginAs}
+            logout={logout}
+          />
 
           <nav className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible">
             {navigation.map((item) => {
@@ -580,6 +657,7 @@ export function WeldDesignApp() {
           <Header
             activeNav={activeNav}
             selectedRole={selectedRole}
+            currentUser={currentUser}
             accessibleModules={accessibleModules}
             notice={notice}
           />
@@ -587,6 +665,7 @@ export function WeldDesignApp() {
           <ActiveWorkspace
             activeSection={activeSection}
             selectedRole={selectedRole}
+            currentUser={currentUser}
             openSection={openSection}
             estimateInput={estimateInput}
             estimate={estimate}
@@ -599,6 +678,7 @@ export function WeldDesignApp() {
             inventoryList={inventoryList}
             addInventoryDemoItem={addInventoryDemoItem}
             markInventoryDamaged={markInventoryDamaged}
+            updateInventoryItem={updateInventoryItem}
             uploadName={uploadName}
             setUploadName={setUploadName}
             scanResult={scanResult}
@@ -628,11 +708,13 @@ export function WeldDesignApp() {
 function Header({
   activeNav,
   selectedRole,
+  currentUser,
   accessibleModules,
   notice,
 }: {
   activeNav: NavItem;
   selectedRole: Role;
+  currentUser: AppUser | null;
   accessibleModules: number;
   notice: string;
 }) {
@@ -653,10 +735,13 @@ function Header({
 
         <div className="grid gap-2 sm:grid-cols-3 lg:w-[460px]">
           <MiniStatus label="Role" value={roleLabels[selectedRole]} />
+          <MiniStatus label="User" value={currentUser?.name ?? "Guest Client"} />
           <MiniStatus label="Access" value={`${accessibleModules}/${navigation.length}`} />
-          <MiniStatus label="Status" value={notice} />
         </div>
       </div>
+      <p className="mt-3 rounded-lg bg-stone-100 px-3 py-2 text-sm font-medium text-stone-700">
+        {notice}
+      </p>
     </header>
   );
 }
@@ -664,6 +749,7 @@ function Header({
 function ActiveWorkspace(props: {
   activeSection: SectionId;
   selectedRole: Role;
+  currentUser: AppUser | null;
   openSection: (section: SectionId) => void;
   estimateInput: EstimateInput;
   estimate: EstimateResult;
@@ -676,6 +762,7 @@ function ActiveWorkspace(props: {
   inventoryList: InventoryState[];
   addInventoryDemoItem: () => void;
   markInventoryDamaged: (code: string) => void;
+  updateInventoryItem: (code: string, nextItem: InventoryState) => void;
   uploadName: string;
   setUploadName: (name: string) => void;
   scanResult: WeldScanResult;
@@ -696,6 +783,19 @@ function ActiveWorkspace(props: {
   startQuiz: (title: string) => void;
   setNotice: (notice: string) => void;
 }) {
+  const navItem = navigation.find((item) => item.id === props.activeSection) ?? navigation[0];
+
+  if (!canAccess(props.selectedRole, navItem.permission)) {
+    return (
+      <AccessDenied
+        navItem={navItem}
+        selectedRole={props.selectedRole}
+        currentUser={props.currentUser}
+        openSection={props.openSection}
+      />
+    );
+  }
+
   switch (props.activeSection) {
     case "security":
       return <SecurityWorkspace selectedRole={props.selectedRole} setNotice={props.setNotice} />;
@@ -712,14 +812,17 @@ function ActiveWorkspace(props: {
     case "inventory":
       return (
         <InventoryWorkspace
+          selectedRole={props.selectedRole}
           inventoryList={props.inventoryList}
           addInventoryDemoItem={props.addInventoryDemoItem}
           markInventoryDamaged={props.markInventoryDamaged}
+          updateInventoryItem={props.updateInventoryItem}
         />
       );
     case "projects":
       return (
         <ProjectWorkspace
+          selectedRole={props.selectedRole}
           projectStageList={props.projectStageList}
           approveStage={props.approveStage}
           advanceStage={props.advanceStage}
@@ -771,6 +874,7 @@ function ActiveWorkspace(props: {
     case "client":
       return (
         <ClientWorkspace
+          selectedRole={props.selectedRole}
           projectStageList={props.projectStageList}
           approveStage={props.approveStage}
         />
@@ -779,11 +883,22 @@ function ActiveWorkspace(props: {
       return <MobileWorkspace setNotice={props.setNotice} />;
     case "overview":
     default:
-      return <OverviewWorkspace openSection={props.openSection} />;
+      return (
+        <OverviewWorkspace
+          selectedRole={props.selectedRole}
+          openSection={props.openSection}
+        />
+      );
   }
 }
 
-function OverviewWorkspace({ openSection }: { openSection: (section: SectionId) => void }) {
+function OverviewWorkspace({
+  selectedRole,
+  openSection,
+}: {
+  selectedRole: Role;
+  openSection: (section: SectionId) => void;
+}) {
   const priorityModules: SectionId[] = ["estimator", "projects", "inventory", "ai"];
 
   return (
@@ -812,20 +927,27 @@ function OverviewWorkspace({ openSection }: { openSection: (section: SectionId) 
               .filter((item) => item.id !== "overview")
               .map((item) => {
                 const Icon = item.icon;
+                const isAccessible = canAccess(selectedRole, item.permission);
                 return (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => openSection(item.id)}
-                    className="rounded-lg border border-stone-200 bg-white p-3 text-left transition hover:border-stone-400 hover:shadow-sm"
+                    className={`rounded-lg border p-3 text-left transition hover:border-stone-400 hover:shadow-sm ${
+                      isAccessible
+                        ? "border-stone-200 bg-white"
+                        : "border-stone-200 bg-stone-50 opacity-70"
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <Icon className="size-5 text-stone-600" aria-hidden="true" />
-                      {priorityModules.includes(item.id) && (
+                      {!isAccessible ? (
+                        <LockKeyhole className="size-4 text-stone-400" aria-hidden="true" />
+                      ) : priorityModules.includes(item.id) ? (
                         <span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">
                           prioritas
                         </span>
-                      )}
+                      ) : null}
                     </div>
                     <p className="mt-4 text-sm font-semibold">{item.label}</p>
                     <p className="mt-1 text-xs leading-5 text-stone-500">{item.summary}</p>
@@ -858,6 +980,151 @@ function OverviewWorkspace({ openSection }: { openSection: (section: SectionId) 
         </Panel>
       </section>
     </div>
+  );
+}
+
+function AuthPanel({
+  currentUser,
+  selectedRole,
+  authState,
+  loginAs,
+  logout,
+}: {
+  currentUser: AppUser | null;
+  selectedRole: Role;
+  authState: ApiState;
+  loginAs: (user: AppUser, password?: string) => void;
+  logout: () => void;
+}) {
+  const [loginEmail, setLoginEmail] = useState(demoUsers[0]?.email ?? "");
+  const [loginPassword, setLoginPassword] = useState("password-demo-123");
+  const selectedDemoUser = demoUsers.find((user) => user.email === loginEmail);
+
+  function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (selectedDemoUser) {
+      loginAs(selectedDemoUser, loginPassword);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-stone-500">
+            Login & akses
+          </p>
+          <p className="mt-1 text-sm font-semibold">
+            {currentUser?.name ?? "Guest Client"}
+          </p>
+          <p className="mt-1 text-xs text-stone-500">
+            Role otomatis: {roleLabels[selectedRole]}
+          </p>
+        </div>
+        {currentUser ? (
+          <button
+            type="button"
+            title="Logout"
+            onClick={logout}
+            className="flex size-9 items-center justify-center rounded-lg border border-stone-200 hover:bg-stone-100"
+          >
+            <LogOut className="size-4" aria-hidden="true" />
+          </button>
+        ) : (
+          <div className="flex size-9 items-center justify-center rounded-lg bg-stone-100 text-stone-600">
+            <UserRound className="size-4" aria-hidden="true" />
+          </div>
+        )}
+      </div>
+
+      {!currentUser && (
+        <form className="mt-3 grid gap-2" onSubmit={handleLoginSubmit}>
+          <label className="grid gap-1 text-xs font-semibold text-stone-600">
+            Email akun
+            <select
+              name="loginEmail"
+              value={loginEmail}
+              onChange={(event) => setLoginEmail(event.target.value)}
+              className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-950 outline-none focus:border-stone-500"
+            >
+              {demoUsers.map((user) => (
+                <option key={user.email} value={user.email}>
+                  {user.name} - {user.email}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs font-semibold text-stone-600">
+            Password
+            <input
+              name="loginPassword"
+              type="password"
+              value={loginPassword}
+              onChange={(event) => setLoginPassword(event.target.value)}
+              className="rounded-lg border border-stone-200 px-3 py-2 text-sm font-medium text-stone-950 outline-none focus:border-stone-500"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={!selectedDemoUser || authState.state === "loading"}
+            className="mt-1 inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+          >
+            <LogIn className="size-4" aria-hidden="true" />
+            Masuk
+          </button>
+          <p className="text-xs leading-5 text-stone-500">
+            Role mengikuti email yang login. Tanpa login, sistem memakai Client.
+          </p>
+        </form>
+      )}
+
+      <p
+        className={`mt-3 text-xs leading-5 ${
+          authState.state === "error" ? "text-red-700" : "text-stone-500"
+        }`}
+      >
+        {authState.message}
+      </p>
+    </div>
+  );
+}
+
+function AccessDenied({
+  navItem,
+  selectedRole,
+  currentUser,
+  openSection,
+}: {
+  navItem: NavItem;
+  selectedRole: Role;
+  currentUser: AppUser | null;
+  openSection: (section: SectionId) => void;
+}) {
+  return (
+    <Panel>
+      <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="flex size-12 items-center justify-center rounded-lg bg-red-50 text-red-700">
+            <LockKeyhole className="size-5" aria-hidden="true" />
+          </div>
+          <h3 className="mt-4 text-xl font-semibold">Akses dibatasi</h3>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-600">
+            Modul {navItem.label} membutuhkan permission{" "}
+            <span className="font-semibold text-stone-950">{navItem.permission}</span>.
+            Akun aktif adalah {currentUser?.name ?? "Guest"} dengan role{" "}
+            <span className="font-semibold text-stone-950">{roleLabels[selectedRole]}</span>.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => openSection(selectedRole === "CLIENT" ? "client" : "overview")}
+          className="rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
+        >
+          Buka modul yang tersedia
+        </button>
+      </div>
+    </Panel>
   );
 }
 
@@ -1134,14 +1401,19 @@ function EstimatorWorkspace({
 }
 
 function ProjectWorkspace({
+  selectedRole,
   projectStageList,
   approveStage,
   advanceStage,
 }: {
+  selectedRole: Role;
   projectStageList: ProjectStageState[];
   approveStage: (stageName: string) => void;
   advanceStage: (stageName: string) => void;
 }) {
+  const canUpdate = canAccess(selectedRole, "project:update");
+  const canApprove = canAccess(selectedRole, "project:approve");
+
   return (
     <Panel>
       <PanelTitle icon={ChartNoAxesGantt} eyebrow="Monitoring" title="Timeline proyek" />
@@ -1167,14 +1439,18 @@ function ProjectWorkspace({
                 <button
                   type="button"
                   onClick={() => advanceStage(stage.name)}
-                  className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+                  disabled={!canUpdate}
+                  title={canUpdate ? "Update progress" : "Role ini tidak punya project:update"}
+                  className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   + Progress
                 </button>
                 <button
                   type="button"
                   onClick={() => approveStage(stage.name)}
-                  className="rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
+                  disabled={!canApprove}
+                  title={canApprove ? "Approve tahap" : "Role ini tidak punya project:approve"}
+                  className="rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
                 >
                   Approve
                 </button>
@@ -1199,14 +1475,45 @@ function ProjectWorkspace({
 }
 
 function InventoryWorkspace({
+  selectedRole,
   inventoryList,
   addInventoryDemoItem,
   markInventoryDamaged,
+  updateInventoryItem,
 }: {
+  selectedRole: Role;
   inventoryList: InventoryState[];
   addInventoryDemoItem: () => void;
   markInventoryDamaged: (code: string) => void;
+  updateInventoryItem: (code: string, nextItem: InventoryState) => void;
 }) {
+  const [editingCode, setEditingCode] = useState<string | null>(null);
+  const [draftItem, setDraftItem] = useState<InventoryState | null>(null);
+  const canEdit = canAccess(selectedRole, "inventory:manage");
+
+  function startEdit(item: InventoryState) {
+    setEditingCode(item.code);
+    setDraftItem({ ...item });
+  }
+
+  function cancelEdit() {
+    setEditingCode(null);
+    setDraftItem(null);
+  }
+
+  function updateDraft<K extends keyof InventoryState>(key: K, value: InventoryState[K]) {
+    setDraftItem((draft) => (draft ? { ...draft, [key]: value } : draft));
+  }
+
+  function saveDraft(originalCode: string) {
+    if (!draftItem) {
+      return;
+    }
+
+    updateInventoryItem(originalCode, draftItem);
+    cancelEdit();
+  }
+
   return (
     <section className="grid gap-4 xl:grid-cols-[1fr_0.7fr]">
       <Panel>
@@ -1215,36 +1522,141 @@ function InventoryWorkspace({
           <button
             type="button"
             onClick={addInventoryDemoItem}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
+            disabled={!canEdit}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
           >
             <Plus className="size-4" aria-hidden="true" />
             Tambah item
           </button>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {inventoryList.map((item) => (
-            <div key={item.code} className="rounded-lg border border-stone-200 bg-white p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold">{item.name}</p>
-                  <p className="mt-1 font-mono text-xs text-stone-500">{item.code}</p>
+          {inventoryList.map((item) => {
+            const editingItem = editingCode === item.code ? draftItem : null;
+
+            return (
+              <div key={item.code} className="rounded-lg border border-stone-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">{item.name}</p>
+                    <p className="mt-1 font-mono text-xs text-stone-500">{item.code}</p>
+                  </div>
+                  <ConditionBadge condition={item.condition} />
                 </div>
-                <ConditionBadge condition={item.condition} />
+
+                {editingItem ? (
+                  <div className="mt-3 grid gap-2">
+                    <label className="grid gap-1 text-xs font-semibold text-stone-600">
+                      Nama alat/bahan
+                      <input
+                        name="inventoryName"
+                        value={editingItem.name}
+                        onChange={(event) => updateDraft("name", event.target.value)}
+                        className="rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-950 outline-none focus:border-stone-500"
+                      />
+                    </label>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="grid gap-1 text-xs font-semibold text-stone-600">
+                        Kode
+                        <input
+                          name="inventoryCode"
+                          value={editingItem.code}
+                          onChange={(event) => updateDraft("code", event.target.value)}
+                          className="rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-950 outline-none focus:border-stone-500"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs font-semibold text-stone-600">
+                        Kondisi
+                        <select
+                          name="inventoryCondition"
+                          value={editingItem.condition}
+                          onChange={(event) => updateDraft("condition", event.target.value)}
+                          className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-stone-500"
+                        >
+                          <option value="Baik">Baik</option>
+                          <option value="Service">Service</option>
+                          <option value="Kritis">Kritis</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <label className="grid gap-1 text-xs font-semibold text-stone-600">
+                        Lokasi
+                        <input
+                          name="inventoryLocation"
+                          value={editingItem.location}
+                          onChange={(event) => updateDraft("location", event.target.value)}
+                          className="rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-950 outline-none focus:border-stone-500"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs font-semibold text-stone-600">
+                        Umur
+                        <input
+                          name="inventoryAge"
+                          value={editingItem.age}
+                          onChange={(event) => updateDraft("age", event.target.value)}
+                          className="rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-950 outline-none focus:border-stone-500"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs font-semibold text-stone-600">
+                        Stok
+                        <input
+                          name="inventoryStock"
+                          value={editingItem.stock}
+                          onChange={(event) => updateDraft("stock", event.target.value)}
+                          className="rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-950 outline-none focus:border-stone-500"
+                        />
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => saveDraft(item.code)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
+                      >
+                        <Save className="size-4" aria-hidden="true" />
+                        Simpan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+                      >
+                        <X className="size-4" aria-hidden="true" />
+                        Batal
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-stone-500">
+                      <span>{item.location}</span>
+                      <span>{item.age}</span>
+                      <span className="text-right font-semibold text-stone-700">{item.stock}</span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => startEdit(item)}
+                        disabled={!canEdit}
+                        className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Edit3 className="size-4" aria-hidden="true" />
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => markInventoryDamaged(item.code)}
+                        disabled={!canEdit}
+                        className="rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Laporkan kerusakan
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-stone-500">
-                <span>{item.location}</span>
-                <span>{item.age}</span>
-                <span className="text-right font-semibold text-stone-700">{item.stock}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => markInventoryDamaged(item.code)}
-                className="mt-3 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
-              >
-                Laporkan kerusakan
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Panel>
 
@@ -1656,12 +2068,16 @@ function AnalyticsWorkspace() {
 }
 
 function ClientWorkspace({
+  selectedRole,
   projectStageList,
   approveStage,
 }: {
+  selectedRole: Role;
   projectStageList: ProjectStageState[];
   approveStage: (stageName: string) => void;
 }) {
+  const canApprove = canAccess(selectedRole, "project:approve");
+
   return (
     <Panel>
       <PanelTitle icon={ClipboardList} eyebrow="Client Portal" title="Laporan real-time" />
@@ -1684,7 +2100,8 @@ function ClientWorkspace({
             <button
               type="button"
               onClick={() => approveStage(stage.name)}
-              className="mt-4 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
+              disabled={!canApprove}
+              className="mt-4 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
             >
               Approve client
             </button>

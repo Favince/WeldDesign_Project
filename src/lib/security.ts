@@ -21,6 +21,7 @@ export const permissions = [
   "portfolio:publish",
   "gallery:moderate",
   "social:schedule",
+  "learning:access",
   "analytics:read",
 ] as const;
 
@@ -39,6 +40,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "portfolio:publish",
     "gallery:moderate",
     "social:schedule",
+    "learning:access",
     "analytics:read",
   ],
   SISWA: [
@@ -48,6 +50,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "ai:scan",
     "design:generate",
     "portfolio:publish",
+    "learning:access",
   ],
   CLIENT: ["dashboard:read", "project:approve", "analytics:read"],
 };
