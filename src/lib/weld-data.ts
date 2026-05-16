@@ -85,13 +85,6 @@ export const featureModules = [
     metric: "Sheet response",
   },
   {
-    id: "analytics",
-    title: "Analytics",
-    owner: "Admin",
-    status: "Google Sheet",
-    metric: "CSV-ready",
-  },
-  {
     id: "mobile",
     title: "PWA & AR Preview",
     owner: "Client",
@@ -256,33 +249,6 @@ export const learningModules = [
       "Dokumentasi proyek las: foto before-after, catatan material, progres harian, masalah, solusi, dan approval akhir.",
     formUrl: "",
     sheetUrl: "",
-  },
-] as const;
-
-export const analyticsRows = [
-  {
-    label: "Order aktif",
-    value: "14",
-    trend: "6 pending",
-    source: "Orders!A:H",
-  },
-  {
-    label: "Progress rata-rata",
-    value: "57%",
-    trend: "+11%",
-    source: "Projects!A:G",
-  },
-  {
-    label: "Masalah aktif",
-    value: "3",
-    trend: "-2 minggu ini",
-    source: "Issues!A:F",
-  },
-  {
-    label: "Approval client",
-    value: "93%",
-    trend: "+8%",
-    source: "Approvals!A:E",
   },
 ] as const;
 

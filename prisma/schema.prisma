@@ -362,7 +362,6 @@ model SocialPost {
   mediaUrls   String[]
   scheduledAt DateTime
   publishedAt DateTime?
-  analytics   Json?
   createdAt   DateTime     @default(now())
 
   project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)

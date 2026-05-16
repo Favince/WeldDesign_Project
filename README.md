@@ -1,6 +1,6 @@
 # WeldDesign Production
 
-Web app terpadu untuk operasional produksi las dan DKV: dashboard personal, estimasi biaya, inventaris, monitoring proyek, AI weld scan, AI design generator, portofolio siswa, galeri publik, sosial media, e-learning, analytics, client portal, dan PWA.
+Web app terpadu untuk operasional produksi las: dashboard personal, estimasi biaya, inventaris, monitoring proyek, portofolio siswa, automation spreadsheet, sosial media, e-learning, client portal, dan PWA.
 
 Target domain: `krisavaaerovin.my.id`  
 Target hosting: Vercel
@@ -12,7 +12,7 @@ Target hosting: Vercel
 - Tailwind CSS
 - Prisma schema untuk PostgreSQL
 - JWT/bcrypt demo endpoint
-- API route mock untuk estimasi biaya, AI scan, audit log, export CSV, dan sosial media
+- API route mock untuk estimasi biaya, audit log, export CSV, sosial media, dan sinkronisasi Google Spreadsheet
 
 ## Jalankan Lokal
 
@@ -47,7 +47,6 @@ Isi `DATABASE_URL` dan secret lain lewat environment variables lokal atau Vercel
 - `GET /api/health`
 - `POST /api/estimates`
 - `GET /api/export/estimates`
-- `POST /api/ai/weld-scan`
 - `POST /api/auth/demo`
 - `GET /api/audit`
 - `GET /api/social/schedule`

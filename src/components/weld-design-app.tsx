@@ -2,7 +2,6 @@
 
 import {
   Activity,
-  BarChart3,
   Bell,
   BookOpenCheck,
   Calculator,
@@ -73,7 +72,6 @@ import {
   type Role,
 } from "@/lib/security";
 import {
-  analyticsRows,
   auditTrail,
   chatThreads,
   dashboardStats,
@@ -96,7 +94,6 @@ type SectionId =
   | "automation"
   | "social"
   | "learning"
-  | "analytics"
   | "client"
   | "mobile";
 
@@ -163,7 +160,7 @@ const navigation: NavItem[] = [
     label: "Sosmed",
     icon: Megaphone,
     permission: "social:schedule",
-    summary: "Jadwal IG/TikTok, template, dan analytics engagement.",
+    summary: "Jadwal IG/TikTok, template, dan engagement.",
   },
   {
     id: "learning",
@@ -171,13 +168,6 @@ const navigation: NavItem[] = [
     icon: BookOpenCheck,
     permission: "learning:access",
     summary: "Materi download, soal Google Form, score, dan koreksi otomatis.",
-  },
-  {
-    id: "analytics",
-    label: "Analytics",
-    icon: BarChart3,
-    permission: "analytics:read",
-    summary: "Dashboard performa berbasis Google Spreadsheet.",
   },
   {
     id: "client",
@@ -205,32 +195,149 @@ const initialEstimate: EstimateInput = {
   urgency: "Normal",
 };
 
-const defaultSpreadsheetAppsScript = `function doPost(e) {
-  var payload = {};
-  if (e && e.parameter && e.parameter.payload) {
-    payload = JSON.parse(e.parameter.payload);
+const defaultSpreadsheetAppsScript = `var WELDDESIGN_SHEETS = {
+  Orders: ["id", "title", "client", "issue", "status", "progress", "approved", "accepted", "updatedAt"],
+  Projects: ["id", "name", "owner", "progress", "start", "end", "state", "updatedAt"],
+  Inventory: ["id", "code", "name", "condition", "location", "age", "stock", "updatedAt"],
+  Estimates: ["id", "project", "material", "weldType", "quantity", "totalCost", "createdAt", "updatedAt"],
+  Portfolio: ["id", "title", "student", "major", "year", "rating", "summary", "updatedAt"],
+  Learning: ["id", "title", "type", "description", "score", "progress", "formUrl", "sheetUrl", "updatedAt"],
+  Social: ["id", "platform", "time", "caption", "engagement", "updatedAt"],
+  Automation: ["id", "name", "spreadsheetName", "webAppUrl", "status", "lastRun", "updatedAt"]
+};
+
+function doGet() {
+  var ss = ensureSpreadsheet_("WeldDesign Production Data");
+  return HtmlService.createHtmlOutput(
+    '<p>WeldDesign Spreadsheet connected.</p><p><a target="_blank" href="' + ss.getUrl() + '">Open Spreadsheet</a></p>'
+  );
+}
+
+function doPost(e) {
+  var payload = parsePayload_(e);
+  var ss = ensureSpreadsheet_(payload.spreadsheetName || "WeldDesign Production Data");
+  setupSheets_(ss);
+
+  if (!payload.table) {
+    return htmlResponse_({ ok: true, action: "create-spreadsheet", spreadsheetUrl: ss.getUrl(), spreadsheetId: ss.getId() });
   }
 
-  var spreadsheetName = payload.spreadsheetName || "WeldDesign Production Data";
-  var ss = SpreadsheetApp.create(spreadsheetName);
-  var sheets = [
-    { name: "Orders", headers: ["Order ID", "Client", "Status", "Progress", "Issue", "Accepted"] },
-    { name: "Projects", headers: ["Project", "Owner", "Start", "End", "Progress", "State"] },
-    { name: "Inventory", headers: ["Code", "Name", "Condition", "Location", "Age", "Stock"] },
-    { name: "Learning", headers: ["Title", "Type", "Score", "Progress", "Sheet URL"] },
-    { name: "Analytics", headers: ["Metric", "Value", "Trend", "Source"] }
-  ];
+  var table = String(payload.table);
+  var sheet = getOrCreateSheet_(ss, table);
+  var records = payload.records || (payload.record ? [payload.record] : []);
+  var action = payload.action || "upsert";
 
-  sheets.forEach(function(sheetConfig, index) {
-    var sheet = index === 0 ? ss.getSheets()[0] : ss.insertSheet(sheetConfig.name);
-    sheet.setName(sheetConfig.name);
-    sheet.getRange(1, 1, 1, sheetConfig.headers.length).setValues([sheetConfig.headers]);
-    sheet.setFrozenRows(1);
+  records.forEach(function(record) {
+    if (action === "delete") {
+      deleteRecord_(sheet, String(record.id || record.code || record.name || record.title));
+      return;
+    }
+
+    upsertRecord_(sheet, normalizeRecord_(table, record));
   });
 
+  return jsonResponse_({ ok: true, action: action, table: table, count: records.length, spreadsheetUrl: ss.getUrl(), spreadsheetId: ss.getId() });
+}
+
+function parsePayload_(e) {
+  if (e && e.parameter && e.parameter.payload) {
+    return JSON.parse(e.parameter.payload);
+  }
+  if (e && e.postData && e.postData.contents) {
+    return JSON.parse(e.postData.contents);
+  }
+  return {};
+}
+
+function ensureSpreadsheet_(name) {
+  var props = PropertiesService.getScriptProperties();
+  var spreadsheetId = props.getProperty("WELDDESIGN_SPREADSHEET_ID");
+  if (spreadsheetId) {
+    return SpreadsheetApp.openById(spreadsheetId);
+  }
+
+  var ss = SpreadsheetApp.create(name);
+  props.setProperty("WELDDESIGN_SPREADSHEET_ID", ss.getId());
+  setupSheets_(ss);
+  return ss;
+}
+
+function setupSheets_(ss) {
+  Object.keys(WELDDESIGN_SHEETS).forEach(function(table, index) {
+    var sheet = ss.getSheetByName(table);
+    if (!sheet) {
+      sheet = index === 0 ? ss.getSheets()[0] : ss.insertSheet(table);
+      sheet.setName(table);
+    }
+    ensureHeaders_(sheet, WELDDESIGN_SHEETS[table]);
+  });
+}
+
+function getOrCreateSheet_(ss, table) {
+  var sheet = ss.getSheetByName(table) || ss.insertSheet(table);
+  ensureHeaders_(sheet, WELDDESIGN_SHEETS[table] || ["id", "data", "updatedAt"]);
+  return sheet;
+}
+
+function ensureHeaders_(sheet, headers) {
+  var current = sheet.getLastColumn() ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0] : [];
+  if (current.join("") === "") {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+  }
+}
+
+function normalizeRecord_(table, record) {
+  var headers = WELDDESIGN_SHEETS[table] || ["id", "data", "updatedAt"];
+  var normalized = {};
+  headers.forEach(function(header) {
+    normalized[header] = record[header] !== undefined ? record[header] : "";
+  });
+  normalized.id = String(normalized.id || record.code || record.name || record.title || new Date().getTime());
+  normalized.updatedAt = new Date().toISOString();
+  return normalized;
+}
+
+function upsertRecord_(sheet, record) {
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var rowIndex = findRecordRow_(sheet, String(record.id));
+  var row = headers.map(function(header) { return record[header] !== undefined ? record[header] : ""; });
+
+  if (rowIndex > 0) {
+    sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  } else {
+    sheet.appendRow(row);
+  }
+}
+
+function deleteRecord_(sheet, id) {
+  var rowIndex = findRecordRow_(sheet, id);
+  if (rowIndex > 0) {
+    sheet.deleteRow(rowIndex);
+  }
+}
+
+function findRecordRow_(sheet, id) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return -1;
+  }
+  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0]) === String(id)) {
+      return i + 2;
+    }
+  }
+  return -1;
+}
+
+function jsonResponse_(body) {
+  return ContentService.createTextOutput(JSON.stringify(body)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function htmlResponse_(body) {
   return HtmlService.createHtmlOutput(
-    '<script>window.location.href="' + ss.getUrl() + '";</script>' +
-    '<p>Spreadsheet created: <a target="_blank" href="' + ss.getUrl() + '">' + ss.getUrl() + '</a></p>'
+    '<p>Spreadsheet ready.</p><p><a target="_blank" href="' + body.spreadsheetUrl + '">Open Spreadsheet</a></p>'
   );
 }`;
 
@@ -360,14 +467,6 @@ type ClientOrderState = {
   progress: number;
   approved: boolean;
   accepted: boolean;
-};
-
-type AnalyticsProjectState = {
-  project: string;
-  owner: string;
-  progress: string;
-  issue: string;
-  status: string;
 };
 
 export function WeldDesignApp() {
@@ -535,6 +634,12 @@ export function WeldDesignApp() {
       ),
     );
     setNotice(`Tahap "${stageName}" disetujui`);
+    void syncGoogleSheet(
+      "Projects",
+      "upsert",
+      { id: stageName, name: stageName, progress: 100, state: "Approved" },
+      setNotice,
+    );
   }
 
   function advanceStage(stageName: string) {
@@ -549,6 +654,21 @@ export function WeldDesignApp() {
           : stage,
       ),
     );
+    const currentStage = projectStageList.find((stage) => stage.name === stageName);
+    if (currentStage) {
+      const progress = Math.min(100, currentStage.progress + 12);
+      void syncGoogleSheet(
+        "Projects",
+        "upsert",
+        {
+          id: currentStage.name,
+          ...currentStage,
+          progress,
+          state: progress >= 100 ? "Ready approval" : "On track",
+        },
+        setNotice,
+      );
+    }
   }
 
   function regressStage(stageName: string) {
@@ -564,6 +684,21 @@ export function WeldDesignApp() {
       ),
     );
     setNotice(`Progress "${stageName}" dikurangi`);
+    const currentStage = projectStageList.find((stage) => stage.name === stageName);
+    if (currentStage) {
+      const progress = Math.max(0, currentStage.progress - 12);
+      void syncGoogleSheet(
+        "Projects",
+        "upsert",
+        {
+          id: currentStage.name,
+          ...currentStage,
+          progress,
+          state: progress === 0 ? "Waiting" : "Need revision",
+        },
+        setNotice,
+      );
+    }
   }
 
   function updateProjectStage(stageName: string, nextStage: ProjectStageState) {
@@ -571,11 +706,13 @@ export function WeldDesignApp() {
       stages.map((stage) => (stage.name === stageName ? nextStage : stage)),
     );
     setNotice(`Tahap "${nextStage.name}" berhasil diedit`);
+    void syncGoogleSheet("Projects", "upsert", { id: nextStage.name, ...nextStage }, setNotice);
   }
 
   function deleteProjectStage(stageName: string) {
     setProjectStageList((stages) => stages.filter((stage) => stage.name !== stageName));
     setNotice(`Tahap "${stageName}" dihapus`);
+    void syncGoogleSheet("Projects", "delete", { id: stageName }, setNotice);
   }
 
   function markInventoryDamaged(code: string) {
@@ -585,6 +722,15 @@ export function WeldDesignApp() {
       ),
     );
     setNotice(`Laporan kerusakan dibuat untuk ${code}`);
+    const item = inventoryList.find((entry) => entry.code === code);
+    if (item) {
+      void syncGoogleSheet(
+        "Inventory",
+        "upsert",
+        { id: code, ...item, condition: "Service", stock: "Perlu cek" },
+        setNotice,
+      );
+    }
   }
 
   function updateInventoryItem(code: string, nextItem: InventoryState) {
@@ -594,11 +740,18 @@ export function WeldDesignApp() {
       ),
     );
     setNotice(`Inventaris ${nextItem.code.trim() || code} berhasil diupdate`);
+    void syncGoogleSheet(
+      "Inventory",
+      "upsert",
+      { id: nextItem.code.trim() || code, ...nextItem },
+      setNotice,
+    );
   }
 
   function deleteInventoryItem(code: string) {
     setInventoryList((items) => items.filter((item) => item.code !== code));
     setNotice(`Inventaris ${code} dihapus`);
+    void syncGoogleSheet("Inventory", "delete", { id: code }, setNotice);
   }
 
   function addInventoryDemoItem() {
@@ -642,6 +795,18 @@ export function WeldDesignApp() {
         ...posts,
       ]);
       setNotice("Post berhasil dijadwalkan");
+      void syncGoogleSheet(
+        "Social",
+        "upsert",
+        {
+          id: `${socialDraft.platform}-${socialDraft.scheduledAt}-${socialDraft.caption}`,
+          platform: socialDraft.platform,
+          time: socialDraft.scheduledAt.replace("T", " "),
+          caption: socialDraft.caption,
+          engagement: "Baru",
+        },
+        setNotice,
+      );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Schedule post gagal");
     }
@@ -652,11 +817,18 @@ export function WeldDesignApp() {
       posts.map((post) => (socialPostKey(post) === originalKey ? nextPost : post)),
     );
     setNotice("Jadwal post berhasil disimpan");
+    void syncGoogleSheet(
+      "Social",
+      "upsert",
+      { id: socialPostKey(nextPost), ...nextPost },
+      setNotice,
+    );
   }
 
   function deleteScheduledPost(postKey: string) {
     setScheduledPosts((posts) => posts.filter((post) => socialPostKey(post) !== postKey));
     setNotice("Jadwal post dihapus");
+    void syncGoogleSheet("Social", "delete", { id: postKey }, setNotice);
   }
 
   if (!isWorkspaceOpen) {
@@ -914,6 +1086,7 @@ function ActiveWorkspace(props: {
           apiState={props.estimateState}
           updateEstimate={props.updateEstimate}
           syncEstimate={props.syncEstimate}
+          setNotice={props.setNotice}
         />
       );
     case "inventory":
@@ -925,6 +1098,7 @@ function ActiveWorkspace(props: {
           markInventoryDamaged={props.markInventoryDamaged}
           updateInventoryItem={props.updateInventoryItem}
           deleteInventoryItem={props.deleteInventoryItem}
+          setNotice={props.setNotice}
         />
       );
     case "projects":
@@ -937,6 +1111,7 @@ function ActiveWorkspace(props: {
           regressStage={props.regressStage}
           updateProjectStage={props.updateProjectStage}
           deleteProjectStage={props.deleteProjectStage}
+          setNotice={props.setNotice}
         />
       );
     case "portfolio":
@@ -952,12 +1127,11 @@ function ActiveWorkspace(props: {
           scheduleSocialPost={props.scheduleSocialPost}
           updateScheduledPost={props.updateScheduledPost}
           deleteScheduledPost={props.deleteScheduledPost}
+          setNotice={props.setNotice}
         />
       );
     case "learning":
       return <LearningWorkspace selectedRole={props.selectedRole} setNotice={props.setNotice} />;
-    case "analytics":
-      return <AnalyticsWorkspace />;
     case "client":
       return (
         <ClientWorkspace
@@ -1223,12 +1397,14 @@ function EstimatorWorkspace({
   apiState,
   updateEstimate,
   syncEstimate,
+  setNotice,
 }: {
   estimateInput: EstimateInput;
   estimate: EstimateResult;
   apiState: ApiState;
   updateEstimate: <K extends keyof EstimateInput>(key: K, value: EstimateInput[K]) => void;
   syncEstimate: () => void;
+  setNotice: (notice: string) => void;
 }) {
   const [estimateRecords, setEstimateRecords] = usePersistentState<EstimateRecordState[]>(
     "welddesign.estimateRecords",
@@ -1271,6 +1447,20 @@ function EstimatorWorkspace({
     setEstimateRecords((records) => [nextRecord, ...records]);
     setViewingEstimateId(nextRecord.id);
     syncEstimate();
+    void syncGoogleSheet(
+      "Estimates",
+      "upsert",
+      {
+        id: nextRecord.id,
+        project: nextRecord.project,
+        material: nextRecord.input.material,
+        weldType: nextRecord.input.weldType,
+        quantity: nextRecord.input.quantity,
+        totalCost: nextRecord.result.totalCost,
+        createdAt: nextRecord.createdAt,
+      },
+      setNotice,
+    );
   }
 
   function editEstimateRecord(record: EstimateRecordState) {
@@ -1287,6 +1477,7 @@ function EstimatorWorkspace({
   function deleteEstimateRecord(recordId: string) {
     setEstimateRecords((records) => records.filter((record) => record.id !== recordId));
     setViewingEstimateId((current) => (current === recordId ? null : current));
+    void syncGoogleSheet("Estimates", "delete", { id: recordId }, setNotice);
   }
 
   return (
@@ -1468,7 +1659,14 @@ function EstimatorWorkspace({
                   <span className="text-sm font-bold">{formatRupiah(record.result.totalCost)}</span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setViewingEstimateId(record.id)} className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewingEstimateId(record.id);
+                      setNotice(`Detail estimasi ${record.project} ditampilkan`);
+                    }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                  >
                     <Eye className="size-3" aria-hidden="true" />
                     Lihat
                   </button>
@@ -1511,6 +1709,7 @@ function ProjectWorkspace({
   regressStage,
   updateProjectStage,
   deleteProjectStage,
+  setNotice,
 }: {
   selectedRole: Role;
   projectStageList: ProjectStageState[];
@@ -1519,6 +1718,7 @@ function ProjectWorkspace({
   regressStage: (stageName: string) => void;
   updateProjectStage: (stageName: string, nextStage: ProjectStageState) => void;
   deleteProjectStage: (stageName: string) => void;
+  setNotice: (notice: string) => void;
 }) {
   const canUpdate = canAccess(selectedRole, "project:update");
   const canApprove = canAccess(selectedRole, "project:approve");
@@ -1676,7 +1876,10 @@ function ProjectWorkspace({
                   <div className="col-span-3 flex flex-wrap gap-2 md:col-span-1">
                     <button
                       type="button"
-                      onClick={() => setViewingStageName(stage.name)}
+                      onClick={() => {
+                        setViewingStageName(stage.name);
+                        setNotice(`Detail tahap ${stage.name} ditampilkan`);
+                      }}
                       className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
                     >
                       <Eye className="size-3" aria-hidden="true" />
@@ -1773,6 +1976,7 @@ function InventoryWorkspace({
   markInventoryDamaged,
   updateInventoryItem,
   deleteInventoryItem,
+  setNotice,
 }: {
   selectedRole: Role;
   inventoryList: InventoryState[];
@@ -1780,6 +1984,7 @@ function InventoryWorkspace({
   markInventoryDamaged: (code: string) => void;
   updateInventoryItem: (code: string, nextItem: InventoryState) => void;
   deleteInventoryItem: (code: string) => void;
+  setNotice: (notice: string) => void;
 }) {
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [draftItem, setDraftItem] = useState<InventoryState | null>(null);
@@ -1957,7 +2162,10 @@ function InventoryWorkspace({
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => setViewingInventoryCode(item.code)}
+                        onClick={() => {
+                          setViewingInventoryCode(item.code);
+                          setNotice(`Detail inventaris ${item.name} ditampilkan`);
+                        }}
                         className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100"
                       >
                         <Eye className="size-4" aria-hidden="true" />
@@ -2097,6 +2305,7 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
     );
     setEditingId(null);
     setNotice(editingId ? "Portofolio berhasil diedit" : "Portofolio baru dibuat");
+    void syncGoogleSheet("Portfolio", "upsert", nextItem, setNotice);
   }
 
   function editPortfolio(item: PortfolioState) {
@@ -2114,6 +2323,7 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
     setViewingPortfolioId((current) => (current === itemId ? "" : current));
     setEditingId((current) => (current === itemId ? null : current));
     setNotice("Portofolio dihapus");
+    void syncGoogleSheet("Portfolio", "delete", { id: itemId }, setNotice);
   }
 
   return (
@@ -2228,7 +2438,10 @@ function PortfolioWorkspace({ setNotice }: { setNotice: (notice: string) => void
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setViewingPortfolioId(item.id)}
+                  onClick={() => {
+                    setViewingPortfolioId(item.id);
+                    setNotice(`Detail portofolio ${item.title} ditampilkan`);
+                  }}
                   className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
                 >
                   <Eye className="size-3" aria-hidden="true" />
@@ -2354,6 +2567,8 @@ function AutomationWorkspace({ setNotice }: { setNotice: (notice: string) => voi
     setEditingAutomationId(null);
     setDraft(nextAutomation);
     setNotice("Automation spreadsheet disimpan");
+    window.localStorage.setItem("welddesign.automationDraft", JSON.stringify(nextAutomation));
+    void syncGoogleSheet("Automation", "upsert", nextAutomation, setNotice);
   }
 
   function editAutomation(automation: AutomationState) {
@@ -2368,6 +2583,7 @@ function AutomationWorkspace({ setNotice }: { setNotice: (notice: string) => voi
     setViewingAutomationId((current) => (current === automationId ? "" : current));
     setEditingAutomationId((current) => (current === automationId ? null : current));
     setNotice("Automation dihapus");
+    void syncGoogleSheet("Automation", "delete", { id: automationId }, setNotice);
   }
 
   async function copyScript() {
@@ -2386,7 +2602,6 @@ function AutomationWorkspace({ setNotice }: { setNotice: (notice: string) => voi
       ["Projects", "Project", "Owner", "Start", "End", "Progress", "State"],
       ["Inventory", "Code", "Name", "Condition", "Location", "Age", "Stock"],
       ["Learning", "Title", "Type", "Score", "Progress", "Sheet URL", ""],
-      ["Analytics", "Metric", "Value", "Trend", "Source", "", ""],
     ]);
     setNotice("Template spreadsheet CSV dibuat");
   }
@@ -2423,6 +2638,12 @@ function AutomationWorkspace({ setNotice }: { setNotice: (notice: string) => voi
       ),
     );
     setNotice("Automation dijalankan di tab baru");
+    void syncGoogleSheet(
+      "Automation",
+      "upsert",
+      { ...automation, status: "Request spreadsheet dikirim ke Apps Script", lastRun },
+      setNotice,
+    );
   }
 
   return (
@@ -2536,7 +2757,10 @@ function AutomationWorkspace({ setNotice }: { setNotice: (notice: string) => voi
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setViewingAutomationId(automation.id)}
+                  onClick={() => {
+                    setViewingAutomationId(automation.id);
+                    setNotice(`Detail automation ${automation.name} ditampilkan`);
+                  }}
                   className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
                 >
                   <Eye className="size-3" aria-hidden="true" />
@@ -2597,6 +2821,7 @@ function SocialWorkspace({
   scheduleSocialPost,
   updateScheduledPost,
   deleteScheduledPost,
+  setNotice,
 }: {
   scheduledPosts: SocialPostState[];
   socialDraft: { platform: string; caption: string; scheduledAt: string };
@@ -2604,6 +2829,7 @@ function SocialWorkspace({
   scheduleSocialPost: () => void;
   updateScheduledPost: (originalKey: string, nextPost: SocialPostState) => void;
   deleteScheduledPost: (postKey: string) => void;
+  setNotice: (notice: string) => void;
 }) {
   const [socialQuery, setSocialQuery] = useState("");
   const [editingPostKey, setEditingPostKey] = useState<string | null>(null);
@@ -2723,7 +2949,14 @@ function SocialWorkspace({
               <p className="mt-2 text-sm text-stone-600">{post.caption}</p>
               <p className="mt-2 text-xs font-semibold text-stone-500">{post.time}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" onClick={() => setViewingPostKey(socialPostKey(post))} className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewingPostKey(socialPostKey(post));
+                    setNotice(`Detail post ${post.platform} ditampilkan`);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
+                >
                   <Eye className="size-3" aria-hidden="true" />
                   Lihat
                 </button>
@@ -2880,6 +3113,7 @@ function LearningWorkspace({
     );
     setEditingMaterialId(null);
     setNotice(editingMaterialId ? "Materi berhasil diedit" : "Materi berhasil dibuat");
+    void syncGoogleSheet("Learning", "upsert", nextModule, setNotice);
   }
 
   function saveQuestionItem() {
@@ -2907,6 +3141,7 @@ function LearningWorkspace({
     );
     setEditingQuestionId(null);
     setNotice(editingQuestionId ? "Soal berhasil diedit" : "Soal Google Form berhasil dibuat");
+    void syncGoogleSheet("Learning", "upsert", nextModule, setNotice);
   }
 
   function editLearningItem(module: LearningState) {
@@ -2922,6 +3157,7 @@ function LearningWorkspace({
   }
 
   function automaticCorrection(moduleId: string) {
+    const currentModule = modules.find((module) => module.id === moduleId);
     setModules((current) =>
       current.map((module) =>
         module.id === moduleId
@@ -2938,6 +3174,25 @@ function LearningWorkspace({
       ),
     );
     setNotice("Koreksi otomatis diperbarui");
+    if (currentModule) {
+      void syncGoogleSheet(
+        "Learning",
+        "upsert",
+        {
+          ...currentModule,
+          progress: currentModule.type === "Soal" ? 100 : currentModule.progress,
+          score:
+            currentModule.type === "Soal"
+              ? Math.min(100, Math.max(75, currentModule.score + 18))
+              : currentModule.score,
+          corrected:
+            currentModule.type === "Soal"
+              ? "Google Form auto correction selesai"
+              : "Materi tidak membutuhkan koreksi soal",
+        },
+        setNotice,
+      );
+    }
   }
 
   function markMaterialOpened(moduleId: string) {
@@ -2969,6 +3224,7 @@ function LearningWorkspace({
     setEditingMaterialId((current) => (current === moduleId ? null : current));
     setEditingQuestionId((current) => (current === moduleId ? null : current));
     setNotice("Materi/soal dihapus");
+    void syncGoogleSheet("Learning", "delete", { id: moduleId }, setNotice);
   }
 
   return (
@@ -3134,7 +3390,10 @@ function LearningWorkspace({
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setViewingLearningId(module.id)}
+                  onClick={() => {
+                    setViewingLearningId(module.id);
+                    setNotice(`Detail ${module.type.toLowerCase()} ${module.title} ditampilkan`);
+                  }}
                   className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
                 >
                   <Eye className="size-3" aria-hidden="true" />
@@ -3222,273 +3481,6 @@ function LearningWorkspace({
   );
 }
 
-function AnalyticsWorkspace() {
-  const [sheetUrl, setSheetUrl] = usePersistentState(
-    "welddesign.analyticsSheetUrl",
-    "https://docs.google.com/spreadsheets/create",
-  );
-  const [sheetStatus, setSheetStatus] = usePersistentState(
-    "welddesign.analyticsSheetStatus",
-    "Link Sheet belum disimpan.",
-  );
-  const [analyticsQuery, setAnalyticsQuery] = useState("");
-  const [editingProjectName, setEditingProjectName] = useState<string | null>(null);
-  const [projectDraft, setProjectDraft] = useState<AnalyticsProjectState | null>(null);
-  const weeklyProgress = [42, 58, 71, 86];
-  const [projectRows, setProjectRows] = usePersistentState<AnalyticsProjectState[]>(
-    "welddesign.analyticsProjectRows",
-    [
-      {
-      project: "Kanopi baja ringan B-21",
-      owner: "Guru QC",
-      progress: "78%",
-      issue: "Cat finishing belum rata",
-      status: "Butuh follow-up",
-    },
-    {
-      project: "Workbench Lab Las",
-      owner: "Siswa",
-      progress: "64%",
-      issue: "Material menunggu stok",
-      status: "On track",
-    },
-    {
-      project: "Pagar workshop sekolah",
-      owner: "Client",
-      progress: "0%",
-      issue: "Order baru",
-      status: "Menunggu approve",
-    },
-    ],
-  );
-  const [viewingProjectName, setViewingProjectName] = useState(projectRows[0]?.project ?? "");
-  const filteredProjectRows = projectRows.filter((row) =>
-    matchesSearch(analyticsQuery, row.project, row.owner, row.progress, row.issue, row.status),
-  );
-  const viewingProject = projectRows.find((row) => row.project === viewingProjectName);
-
-  function updateProjectDraft<K extends keyof AnalyticsProjectState>(
-    key: K,
-    value: AnalyticsProjectState[K],
-  ) {
-    setProjectDraft((current) => (current ? { ...current, [key]: value } : current));
-  }
-
-  function editAnalyticsProject(row: AnalyticsProjectState) {
-    setEditingProjectName(row.project);
-    setProjectDraft({ ...row });
-  }
-
-  function saveAnalyticsProject() {
-    if (!projectDraft || !editingProjectName) {
-      return;
-    }
-
-    setProjectRows((rows) =>
-      rows.map((row) => (row.project === editingProjectName ? projectDraft : row)),
-    );
-    setViewingProjectName(projectDraft.project);
-    setEditingProjectName(null);
-    setProjectDraft(null);
-  }
-
-  function deleteAnalyticsProject(project: string) {
-    setProjectRows((rows) => rows.filter((row) => row.project !== project));
-    setViewingProjectName((current) => (current === project ? "" : current));
-    setEditingProjectName((current) => (current === project ? null : current));
-  }
-
-  function exportAnalyticsCsv() {
-    downloadCsvFile("welddesign-google-spreadsheet.csv", [
-      ["Sheet", "Nama", "Nilai", "Catatan"],
-      ...analyticsRows.map((row) => ["Analytics", row.label, row.value, row.trend]),
-      ...projectRows.map((row) => [
-        "Projects",
-        row.project,
-        row.progress,
-        `${row.status} - ${row.issue}`,
-      ]),
-    ]);
-  }
-
-  return (
-    <section className="grid gap-4">
-      <Panel>
-        <PanelTitle icon={FileSpreadsheet} eyebrow="Google Spreadsheet" title="Pusat data wajib" />
-        <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-          <div className="grid gap-3">
-            <Field label="Link Google Spreadsheet">
-              <input
-                name="analyticsSheetUrl"
-                value={sheetUrl}
-                onChange={(event) => setSheetUrl(event.target.value)}
-                className="field"
-                placeholder="https://docs.google.com/spreadsheets/..."
-              />
-            </Field>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <button
-                type="button"
-                onClick={() => setSheetStatus("Link Google Spreadsheet tersimpan.")}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
-              >
-                <Save className="size-4" aria-hidden="true" />
-                Simpan link
-              </button>
-              <a
-                href={sheetUrl.trim() || "https://docs.google.com/spreadsheets/create"}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-semibold hover:bg-stone-100"
-              >
-                <FileSpreadsheet className="size-4" aria-hidden="true" />
-                Open Google Sheet
-              </a>
-              <button
-                type="button"
-                onClick={exportAnalyticsCsv}
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-stone-200 px-4 py-2 text-sm font-semibold hover:bg-stone-100"
-              >
-                <Download className="size-4" aria-hidden="true" />
-                Export CSV
-              </button>
-            </div>
-            <p className="text-xs font-semibold text-stone-500">{sheetStatus}</p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <MiniStatus label="Data source" value="Google Sheet" />
-            <MiniStatus label="OTP" value="Tidak wajib" />
-            <MiniStatus label="OpenAI key" value="Tidak dipakai" />
-          </div>
-        </div>
-      </Panel>
-
-      <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-        <Panel>
-          <PanelTitle icon={BarChart3} eyebrow="Analytics" title="Ringkasan performa" />
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {analyticsRows.map((row) => (
-              <div
-                key={row.label}
-                className="rounded-lg border border-stone-200 bg-white p-4"
-              >
-                <p className="text-sm font-semibold">{row.label}</p>
-                <p className="mt-3 text-2xl font-bold">{row.value}</p>
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <span className="rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
-                    {row.trend}
-                  </span>
-                  <span className="text-right text-xs font-semibold text-stone-500">
-                    {row.source}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
-            <p className="text-sm font-semibold">Progress mingguan dari Sheet</p>
-            <div className="mt-4 flex h-32 items-end gap-3">
-              {weeklyProgress.map((value, index) => (
-                <div key={value} className="flex flex-1 flex-col items-center gap-2">
-                  <div className="flex h-24 w-full items-end rounded-lg bg-stone-100 p-2">
-                    <div
-                      className="w-full rounded-md bg-stone-950"
-                      style={{ height: `${value}%` }}
-                    />
-                  </div>
-                  <p className="text-xs font-bold text-stone-500">M{index + 1}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Panel>
-
-        <Panel>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <PanelTitle icon={Activity} eyebrow="Operasional" title="Tabel kesehatan proyek" />
-            <label className="relative lg:w-80">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" aria-hidden="true" />
-              <input
-                value={analyticsQuery}
-                onChange={(event) => setAnalyticsQuery(event.target.value)}
-                aria-label="Mencari data analytics"
-                name="analyticsSearch"
-                className="field pl-9"
-                placeholder="Cari data analytics..."
-              />
-            </label>
-          </div>
-          <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
-            <div className="grid grid-cols-[1.2fr_0.7fr_0.5fr_1fr_160px] gap-3 bg-stone-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
-              <span>Project</span>
-              <span>Owner</span>
-              <span>Progress</span>
-              <span>Status</span>
-              <span>Aksi</span>
-            </div>
-            {filteredProjectRows.map((row) => {
-              const editing = editingProjectName === row.project ? projectDraft : null;
-
-              return (
-              <div
-                key={row.project}
-                className="grid grid-cols-[1.2fr_0.7fr_0.5fr_1fr_160px] gap-3 border-t border-stone-100 px-3 py-3 text-sm"
-              >
-                {editing ? (
-                  <>
-                    <input value={editing.project} onChange={(event) => updateProjectDraft("project", event.target.value)} className="field" />
-                    <input value={editing.owner} onChange={(event) => updateProjectDraft("owner", event.target.value)} className="field" />
-                    <input value={editing.progress} onChange={(event) => updateProjectDraft("progress", event.target.value)} className="field" />
-                    <input value={editing.status} onChange={(event) => updateProjectDraft("status", event.target.value)} className="field" />
-                    <button type="button" onClick={saveAnalyticsProject} className="inline-flex items-center justify-center gap-2 rounded-lg bg-stone-950 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800">
-                      <Save className="size-3" aria-hidden="true" />
-                      Simpan
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <p className="font-semibold">{row.project}</p>
-                      <p className="mt-1 text-xs text-red-700">{row.issue}</p>
-                    </div>
-                    <span className="text-stone-600">{row.owner}</span>
-                    <span className="font-semibold">{row.progress}</span>
-                    <span className="text-stone-600">{row.status}</span>
-                    <div className="flex flex-wrap gap-1">
-                      <button type="button" onClick={() => setViewingProjectName(row.project)} className="rounded-md border border-stone-200 px-2 py-1 text-xs font-semibold hover:bg-stone-100">
-                        Lihat
-                      </button>
-                      <button type="button" onClick={() => editAnalyticsProject(row)} className="rounded-md border border-stone-200 px-2 py-1 text-xs font-semibold hover:bg-stone-100">
-                        Edit
-                      </button>
-                      <button type="button" onClick={() => deleteAnalyticsProject(row.project)} className="rounded-md border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50">
-                        Hapus
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-              );
-            })}
-          </div>
-          <div className="mt-4 rounded-lg border border-stone-200 bg-white p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">
-              Detail tampil
-            </p>
-            {viewingProject ? (
-              <p className="mt-3 text-sm text-stone-600">
-                {viewingProject.project} dikelola {viewingProject.owner}, progress {viewingProject.progress}, status {viewingProject.status}. Masalah: {viewingProject.issue}.
-              </p>
-            ) : (
-              <p className="mt-3 text-sm text-stone-500">Pilih baris analytics untuk ditampilkan.</p>
-            )}
-          </div>
-        </Panel>
-      </section>
-    </section>
-  );
-}
-
 function ClientWorkspace({
   selectedRole,
   projectStageList,
@@ -3552,6 +3544,7 @@ function ClientWorkspace({
     );
     setEditingOrderId(null);
     setNotice(editingOrderId ? "Order berhasil diedit" : "Order client dibuat");
+    void syncGoogleSheet("Orders", "upsert", nextOrder, setNotice);
   }
 
   function editOrder(order: ClientOrderState) {
@@ -3584,6 +3577,20 @@ function ClientWorkspace({
           : order,
       ),
     );
+    const currentOrder = orders.find((order) => order.id === orderId);
+    if (currentOrder) {
+      void syncGoogleSheet(
+        "Orders",
+        "upsert",
+        {
+          ...currentOrder,
+          progress,
+          accepted: false,
+          status: progress >= 100 ? "Siap finish" : "Progress diperbarui",
+        },
+        setNotice,
+      );
+    }
   }
 
   function finishOrder(orderId: string) {
@@ -3604,6 +3611,20 @@ function ClientWorkspace({
       ),
     );
     setNotice("Order difinish. Client wajib menerima bahwa barang aman.");
+    const currentOrder = orders.find((order) => order.id === orderId);
+    if (currentOrder) {
+      void syncGoogleSheet(
+        "Orders",
+        "upsert",
+        {
+          ...currentOrder,
+          progress: 100,
+          accepted: false,
+          status: "Menunggu persetujuan aman dari client",
+        },
+        setNotice,
+      );
+    }
   }
 
   function approveOrder(orderId: string) {
@@ -3619,6 +3640,15 @@ function ClientWorkspace({
       ),
     );
     setNotice("Order disetujui oleh tim");
+    const currentOrder = orders.find((order) => order.id === orderId);
+    if (currentOrder) {
+      void syncGoogleSheet(
+        "Orders",
+        "upsert",
+        { ...currentOrder, approved: true, status: "Order diterima tim" },
+        setNotice,
+      );
+    }
   }
 
   function acceptSafeOrder(orderId: string) {
@@ -3638,6 +3668,19 @@ function ClientWorkspace({
       ),
     );
     setNotice("Client menerima dan menyetujui barang aman");
+    const currentOrder = orders.find((order) => order.id === orderId);
+    if (currentOrder) {
+      void syncGoogleSheet(
+        "Orders",
+        "upsert",
+        {
+          ...currentOrder,
+          accepted: true,
+          status: "Client menyetujui barang aman",
+        },
+        setNotice,
+      );
+    }
   }
 
   function deleteOrder(order: ClientOrderState) {
@@ -3649,6 +3692,7 @@ function ClientWorkspace({
     setViewingOrderId((current) => (current === order.id ? "" : current));
     setEditingOrderId((current) => (current === order.id ? null : current));
     setNotice("Order dihapus");
+    void syncGoogleSheet("Orders", "delete", { id: order.id }, setNotice);
   }
 
   return (
@@ -3795,7 +3839,10 @@ function ClientWorkspace({
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setViewingOrderId(order.id)}
+                  onClick={() => {
+                    setViewingOrderId(order.id);
+                    setNotice(`Detail order ${order.title} ditampilkan`);
+                  }}
                   className="inline-flex items-center gap-2 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold hover:bg-stone-100"
                 >
                   <Eye className="size-3" aria-hidden="true" />
@@ -3903,6 +3950,65 @@ function matchesSearch(query: string, ...values: Array<string | number | undefin
 
 function socialPostKey(post: SocialPostState) {
   return `${post.platform}-${post.time}-${post.caption}`;
+}
+
+function readSheetSyncConfig() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const draft = JSON.parse(
+    window.localStorage.getItem("welddesign.automationDraft") || "null",
+  ) as Partial<AutomationState> | null;
+  const automations = JSON.parse(
+    window.localStorage.getItem("welddesign.automations") || "[]",
+  ) as Array<Partial<AutomationState>>;
+  const selected = draft?.webAppUrl ? draft : automations.find((item) => item.webAppUrl);
+
+  if (!selected?.webAppUrl) {
+    return null;
+  }
+
+  return {
+    webAppUrl: selected.webAppUrl,
+    spreadsheetName: selected.spreadsheetName || "WeldDesign Production Data",
+  };
+}
+
+async function syncGoogleSheet(
+  table: string,
+  action: "upsert" | "delete" | "create-spreadsheet",
+  record: Record<string, unknown>,
+  setNotice?: (notice: string) => void,
+) {
+  const config = readSheetSyncConfig();
+
+  if (!config) {
+    setNotice?.("Data lokal tersimpan. Isi Web App URL di Automation agar masuk Google Spreadsheet.");
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/google-sheet/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...config,
+        table,
+        action,
+        record,
+      }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(payload?.error ?? "Sync Google Spreadsheet gagal");
+    }
+
+    setNotice?.(`Google Spreadsheet terupdate: ${table}`);
+  } catch (error) {
+    setNotice?.(error instanceof Error ? error.message : "Sync Google Spreadsheet gagal");
+  }
 }
 
 function downloadCsvFile(fileName: string, rows: string[][]) {

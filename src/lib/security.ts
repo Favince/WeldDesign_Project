@@ -20,7 +20,6 @@ export const permissions = [
   "automation:manage",
   "social:schedule",
   "learning:access",
-  "analytics:read",
 ] as const;
 
 export type Permission = (typeof permissions)[number];
@@ -37,7 +36,6 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "automation:manage",
     "social:schedule",
     "learning:access",
-    "analytics:read",
   ],
   SISWA: [
     "dashboard:read",
@@ -46,7 +44,7 @@ export const rolePermissions: Record<Role, Permission[]> = {
     "portfolio:publish",
     "learning:access",
   ],
-  CLIENT: ["dashboard:read", "project:approve", "analytics:read"],
+  CLIENT: ["dashboard:read", "project:approve"],
 };
 
 export const securityControls = [
